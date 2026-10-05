@@ -1,0 +1,88 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isStaffOrAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['staff', 'admin'])
+      );
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll(['screen', 'seat', 'items', 'total', 'status', 'createdAt']) &&
+        data.screen is string && data.screen.size() <= 10 &&
+        data.seat is string && data.seat.size() <= 10 &&
+        (!('row' in data) || (data.row is string && data.row.size() <= 10)) &&
+        (!('col' in data) || (data.col is string && data.col.size() <= 10)) &&
+        data.items is list && data.items.size() > 0 && data.items.size() <= 50 &&
+        data.total is number && data.total >= 0 &&
+        data.status in ['received', 'preparing', 'ready', 'delivered'] &&
+        (!('note' in data) || (data.note is string && data.note.size() <= 200));
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Menu Items: Customers can browse in cinema, Admins manage items
+    match /menuItems/{menuItemId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(menuItemId) && isAdmin();
+    }
+
+    // Screens: Layout details for Screen 1, 2, 3
+    // Customers can read to validate seat coordinates
+    // Only admins can write/save screen layouts
+    match /screens/{screenId} {
+      allow read: if isValidId(screenId);
+      allow write: if isValidId(screenId) && isAdmin();
+    }
+
+    // Orders:
+    // Cinema seat patrons create their order
+    // Patrons can read order to track live preparation and delivery status
+    // Only authenticated staff or admins can advance order status
+    match /orders/{orderId} {
+      allow read: if isValidId(orderId);
+      allow create: if isValidId(orderId) && isValidOrder(request.resource.data);
+      allow update: if isValidId(orderId) && isStaffOrAdmin() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']) &&
+        request.resource.data.status in ['received', 'preparing', 'ready', 'delivered'];
+      allow delete: if isValidId(orderId) && isAdmin();
+    }
+
+    // Staff and Admin user profiles
+    match /users/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    // Tickets:
+    // Customers can create tickets and read their own ticket by ticketId.
+    // Only staff and admin can list all tickets and update statuses or staff replies.
+    match /tickets/{ticketId} {
+      allow get: if isValidId(ticketId);
+      allow list: if isStaffOrAdmin();
+      allow create: if isValidId(ticketId);
+      allow update: if isValidId(ticketId) && isStaffOrAdmin();
+      allow delete: if isValidId(ticketId) && isAdmin();
+    }
+  }
+}

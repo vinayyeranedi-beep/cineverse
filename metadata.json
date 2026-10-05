@@ -1,0 +1,8 @@
+{
+  "name": "SeatBite - Cinema QR Food Ordering",
+  "description": "Seamless in-seat food & drinks ordering system for cinema moviegoers with live real-time kitchen display and staff delivery tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

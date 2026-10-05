@@ -1,0 +1,239 @@
+{
+  "entities": {
+    "MenuItem": {
+      "title": "MenuItem",
+      "description": "Cinema food and drink menu item sold in the theater lobby",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Food or beverage name",
+          "maxLength": 100
+        },
+        "category": {
+          "type": "string",
+          "description": "Menu category",
+          "enum": ["Popcorn", "Drinks", "Combos", "Snacks", "Desserts"]
+        },
+        "price": {
+          "type": "number",
+          "description": "Price in INR"
+        },
+        "imageUrl": {
+          "type": "string",
+          "description": "Image URL",
+          "maxLength": 500
+        },
+        "isVeg": {
+          "type": "boolean",
+          "description": "True for vegetarian, false for non-vegetarian"
+        },
+        "available": {
+          "type": "boolean",
+          "description": "True if item is in stock"
+        },
+        "description": {
+          "type": "string",
+          "description": "Appetizing description of the dish",
+          "maxLength": 300
+        }
+      },
+      "required": ["name", "category", "price", "isVeg", "available"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Cinema customer order placed from a specific theater seat",
+      "type": "object",
+      "properties": {
+        "screen": {
+          "type": "string",
+          "description": "Cinema screen number",
+          "maxLength": 10
+        },
+        "seat": {
+          "type": "string",
+          "description": "Seat identifier (e.g. F12)",
+          "maxLength": 10
+        },
+        "row": {
+          "type": "string",
+          "description": "Auditorium row letter (e.g. F)",
+          "maxLength": 10
+        },
+        "col": {
+          "type": "string",
+          "description": "Auditorium seat number (e.g. 12)",
+          "maxLength": 10
+        },
+        "items": {
+          "type": "array",
+          "description": "List of ordered items with quantities and prices"
+        },
+        "total": {
+          "type": "number",
+          "description": "Total order amount in INR"
+        },
+        "note": {
+          "type": "string",
+          "description": "Optional customer note (e.g. less salt)",
+          "maxLength": 200
+        },
+        "status": {
+          "type": "string",
+          "description": "Current preparation/delivery status",
+          "enum": ["received", "preparing", "ready", "delivered"]
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Timestamp when order was placed"
+        },
+        "updatedAt": {
+          "type": "number",
+          "description": "Timestamp when order status was updated"
+        }
+      },
+      "required": ["screen", "seat", "items", "total", "status", "createdAt"]
+    },
+    "ScreenLayout": {
+      "title": "ScreenLayout",
+      "description": "Cinema screen auditorium seat layout configuration",
+      "type": "object",
+      "properties": {
+        "screen": {
+          "type": "string",
+          "description": "Screen identifier e.g. 1, 2, 3",
+          "maxLength": 10
+        },
+        "totalSeats": {
+          "type": "number",
+          "description": "Total seat count in auditorium"
+        },
+        "seatsPerRow": {
+          "type": "number",
+          "description": "Calculated or designated seats per row"
+        },
+        "layout": {
+          "type": "array",
+          "description": "Array of row configurations with row label and seat count"
+        },
+        "updatedAt": {
+          "type": "number",
+          "description": "Timestamp when screen layout was saved"
+        }
+      },
+      "required": ["screen", "totalSeats", "seatsPerRow", "layout"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Staff or Admin user record",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "Staff email"
+        },
+        "role": {
+          "type": "string",
+          "description": "Role permission level",
+          "enum": ["staff", "admin"]
+        }
+      },
+      "required": ["email", "role"]
+    },
+    "Ticket": {
+      "title": "Ticket",
+      "description": "Customer reported issue ticket regarding seat, order, or service",
+      "type": "object",
+      "properties": {
+        "ticketId": {
+          "type": "string",
+          "description": "Human readable ticket ID (e.g. TKT-8291)"
+        },
+        "screen": {
+          "type": "string",
+          "description": "Auditorium screen number"
+        },
+        "row": {
+          "type": "string",
+          "description": "Row letter"
+        },
+        "seat": {
+          "type": "string",
+          "description": "Seat number"
+        },
+        "issueType": {
+          "type": "string",
+          "enum": [
+            "Wrong seat",
+            "QR not working",
+            "Order delayed",
+            "Wrong or missing item",
+            "Payment problem",
+            "Other"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional issue description"
+        },
+        "orderId": {
+          "type": "string",
+          "description": "Optional associated order ID"
+        },
+        "contact": {
+          "type": "string",
+          "description": "Optional customer phone/contact number"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["open", "in_progress", "resolved"]
+        },
+        "staffReply": {
+          "type": "string",
+          "description": "Staff reply notes sent to customer"
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Timestamp when ticket was filed"
+        },
+        "updatedAt": {
+          "type": "number",
+          "description": "Timestamp when ticket was updated"
+        }
+      },
+      "required": ["ticketId", "screen", "row", "seat", "issueType", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/menuItems/{menuItemId}": {
+      "schema": {
+        "$ref": "#/entities/MenuItem"
+      },
+      "description": "Public food and beverage menu items. Readable by all, writable only by admins."
+    },
+    "/screens/{screenId}": {
+      "schema": {
+        "$ref": "#/entities/ScreenLayout"
+      },
+      "description": "Cinema screen seat layout definitions for seat validation and QR generation."
+    },
+    "/orders/{orderId}": {
+      "schema": {
+        "$ref": "#/entities/Order"
+      },
+      "description": "In-seat customer orders. Creatable and readable by seat customers, updatable by staff/admin."
+    },
+    "/tickets/{ticketId}": {
+      "schema": {
+        "$ref": "#/entities/Ticket"
+      },
+      "description": "Customer service issue tickets. Creatable and readable by seat customer, manageable by staff/admin."
+    },
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/User"
+      },
+      "description": "Role-based access records for staff and cinema theater administrators."
+    }
+  }
+}
