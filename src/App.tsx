@@ -13,6 +13,18 @@ import { MenuItem, Order, UserProfile, ActiveTab, Ticket, IssueType } from './ty
 const SESSION_STORAGE_SEAT_KEY = 'seatserve_session_seat';
 
 export default function App() {
+  // Handle GitHub Pages SPA 404 redirect (?p=...)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const redirectedPath = params.get('p');
+    if (redirectedPath) {
+      const cleanPath = redirectedPath.startsWith('/') ? redirectedPath : '/' + redirectedPath;
+      const newUrl = window.location.origin + '/cineverse' + cleanPath;
+      window.history.replaceState({}, '', newUrl);
+    }
+  }, []);
+
   // Navigation tab: /order, /counter, /admin
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     if (typeof window !== 'undefined') {
