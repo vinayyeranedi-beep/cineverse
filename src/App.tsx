@@ -7,8 +7,9 @@ import { StaffLoginModal } from './components/StaffLoginModal';
 import { ReportIssueModal } from './components/ReportIssueModal';
 import { QRTestModal } from './components/QRTestModal';
 import { CineverseSplash } from './components/CineverseSplash';
+import { BrandLogoModal } from './components/BrandLogoModal';
 import { CartProvider } from './context/CartContext';
-import { storeService } from './services/store';
+import { storeService, sanitizeMenuItems } from './services/store';
 import { MenuItem, Order, UserProfile, ActiveTab, Ticket, IssueType } from './types';
 
 const SESSION_STORAGE_SEAT_KEY = 'seatserve_session_seat';
@@ -71,6 +72,9 @@ export default function App() {
 
   // QR Test & Seat Simulator Modal state
   const [isQRTestModalOpen, setIsQRTestModalOpen] = useState(false);
+
+  // Brand Logo Customizer Modal state
+  const [isLogoModalOpen, setIsLogoModalOpen] = useState(false);
 
   // Issue Reporting Modal state
   const [isReportIssueModalOpen, setIsReportIssueModalOpen] = useState(false);
@@ -267,7 +271,7 @@ export default function App() {
   // Subscribe to real-time changes
   useEffect(() => {
     const unsubMenu = storeService.subscribeMenu((items) => {
-      setMenuItems(items);
+      setMenuItems(sanitizeMenuItems(items));
     });
 
     const unsubOrders = storeService.subscribeOrders((ord) => {
@@ -367,6 +371,7 @@ export default function App() {
           onOpenStaffLogin={() => setIsStaffLoginModalOpen(true)}
           onOpenReportIssue={() => handleOpenReportIssue()}
           onOpenQRTest={() => setIsQRTestModalOpen(true)}
+          onOpenLogoCustomizer={() => setIsLogoModalOpen(true)}
           activeOrderCount={activeOrdersCount}
           openTicketsCount={openTicketsCount}
         />
@@ -452,6 +457,12 @@ export default function App() {
             updateUrlParams(sc, r, s);
             handleTabChange('order');
           }}
+        />
+
+        {/* Cinema Brand & Logo Customizer Modal */}
+        <BrandLogoModal
+          isOpen={isLogoModalOpen}
+          onClose={() => setIsLogoModalOpen(false)}
         />
       </div>
     </CartProvider>

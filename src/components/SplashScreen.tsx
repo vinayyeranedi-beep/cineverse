@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Film, Sparkles, ArrowRight } from 'lucide-react';
+import { Sparkles, ArrowRight } from 'lucide-react';
+import { CineverseLogo } from './CineverseLogo';
 
 interface SplashScreenProps {
   onDismiss: () => void;
@@ -35,24 +36,16 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onDismiss }) => {
       </div>
 
       <div className="relative z-10 flex flex-col items-center text-center px-4 max-w-sm">
-        {/* Gold on Black Logo */}
-        <div className="relative mb-6">
-          <div className="w-20 h-20 rounded-3xl bg-[#15151C] border-2 border-[#D4AF37] shadow-[0_0_30px_rgba(212,175,55,0.25)] flex items-center justify-center">
-            <Film className="w-10 h-10 text-[#D4AF37]" />
-          </div>
-          <div className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-[#E50914] flex items-center justify-center shadow-lg">
-            <Sparkles className="w-3.5 h-3.5 text-white" />
-          </div>
-        </div>
+        {/* Official Cineverse Logo */}
+        <CineverseLogo
+          layout="vertical"
+          size="xl"
+          showSubtitle={true}
+          subtitle="MULTIPLEX CINEMA DINING"
+          className="mb-4 drop-shadow-[0_0_30px_rgba(212,175,55,0.35)]"
+        />
 
-        <h1 className="font-display font-black text-4xl tracking-wider text-white">
-          SEAT<span className="text-[#D4AF37]">SERVE</span>
-        </h1>
-        <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[#D4AF37] mt-1">
-          Cinema In-Seat Dining
-        </p>
-
-        <p className="text-sm text-[#A1A1AA] mt-4 leading-relaxed">
+        <p className="text-sm text-[#A1A1AA] mt-2 leading-relaxed">
           Scan your seat QR, order snacks, and enjoy uninterrupted cinema delivery.
         </p>
 
@@ -66,7 +59,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onDismiss }) => {
       </div>
 
       <div className="absolute bottom-6 text-[11px] text-[#A1A1AA]/60">
-        SeatServe • Premium QR Cinema Dining
+        Cineverse Multiplex • Premium In-Seat QR Dining
       </div>
     </div>
   );

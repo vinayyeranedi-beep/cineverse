@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Search,
@@ -25,6 +25,7 @@ import { MenuItem, Order, OrderItem, Category, IssueType } from '../types';
 import { storeService } from '../services/store';
 import { soundService } from '../services/sound';
 import { useCart } from '../context/CartContext';
+import { CineverseLogo } from './CineverseLogo';
 
 interface CustomerOrderViewProps {
   screen: string;
@@ -42,6 +43,7 @@ const CATEGORIES: { label: string; value: Category | 'All' }[] = [
   { label: '🥤 Drinks', value: 'Drinks' },
   { label: '🌮 Snacks', value: 'Snacks' },
   { label: '🎬 Combos', value: 'Combos' },
+  { label: '🍰 Desserts', value: 'Desserts' },
 ];
 
 export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
@@ -162,14 +164,19 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
     }
   }, [currentTrackedOrder?.status, currentTrackedOrder?.id, lastDeliveredOrderId]);
 
-  // Filter items
-  const filteredItems = menuItems.filter((item) => {
-    const matchesCategory = selectedCategory === 'All' || item.category === selectedCategory;
-    const matchesSearch =
-      item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.description.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesCategory && matchesSearch;
-  });
+  // Filter items & ensure strictly unique IDs
+  const filteredItems = useMemo(() => {
+    const seenIds = new Set<string>();
+    return menuItems.filter((item) => {
+      if (!item || !item.id || seenIds.has(item.id)) return false;
+      seenIds.add(item.id);
+      const matchesCategory = selectedCategory === 'All' || item.category === selectedCategory;
+      const matchesSearch =
+        item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (item.description || '').toLowerCase().includes(searchQuery.toLowerCase());
+      return matchesCategory && matchesSearch;
+    });
+  }, [menuItems, selectedCategory, searchQuery]);
 
   // Handle Order Placement
   const handlePlaceOrder = async () => {
@@ -330,7 +337,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
 
           {onOpenReportIssue && (
             <button
-              onClick={() => onOpenReportIssue(activeOrder?.orderId || activeOrder?.id)}
+              onClick={() => onOpenReportIssue(currentTrackedOrder?.orderId || currentTrackedOrder?.id)}
               className="text-[11px] font-semibold text-zinc-400 hover:text-[#D4AF37] transition-colors flex items-center gap-1.5 min-h-[32px] px-2 py-1 rounded-lg hover:bg-zinc-800/60"
             >
               <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
@@ -342,17 +349,18 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
 
       {/* CLEAR SEAT BANNER - Delivering to Screen 1 - Seat B7 (No extra clutter) */}
       <section className="bg-[#15151C] border-b border-zinc-800 px-4 py-4 sm:py-5 shadow-lg">
-        <div className="max-w-4xl mx-auto">
-          <div className="flex items-center gap-2 text-[#D4AF37] text-xs font-bold uppercase tracking-wider mb-0.5">
-            <Film className="w-3.5 h-3.5" />
-            <span>SeatServe Cinema Dining</span>
+        <div className="max-w-4xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div className="mb-1.5">
+              <CineverseLogo size="xs" showSubtitle={true} subtitle="IN-SEAT AUDITORIUM DINING" />
+            </div>
+            <h1 className="text-xl sm:text-2xl font-display font-black tracking-tight text-white flex items-center gap-2">
+              Delivering to <span className="text-[#D4AF37]">Screen {screen} - Seat {cleanSeatLabel}</span>
+            </h1>
+            <p className="text-xs text-[#A1A1AA] mt-0.5">
+              Fresh cinema snacks & drinks brought straight to your seat armrest.
+            </p>
           </div>
-          <h1 className="text-xl sm:text-2xl font-display font-black tracking-tight text-white flex items-center gap-2">
-            Delivering to <span className="text-[#D4AF37]">Screen {screen} - Seat {cleanSeatLabel}</span>
-          </h1>
-          <p className="text-xs text-[#A1A1AA] mt-0.5">
-            Fresh snacks & beverages delivered directly to your armrest during the show.
-          </p>
         </div>
       </section>
 
@@ -435,6 +443,11 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
                     {currentTrackedOrder.round && (
                       <span className="px-2 py-0.5 rounded-full bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/40 text-[10px] font-bold">
                         Round {currentTrackedOrder.round} of {MAX_ORDERS_PER_SEAT}
+                      </span>
+                    )}
+                    {currentTrackedOrder.isDemo && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        Demo data
                       </span>
                     )}
                   </div>
@@ -633,7 +646,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
                   <div className="flex-1 min-w-0 flex flex-col justify-between">
                     <div>
                       {/* Veg / Non-Veg Indicator & Category */}
-                      <div className="flex items-center gap-1.5 mb-1 text-[11px]">
+                      <div className="flex flex-wrap items-center gap-1.5 mb-1 text-[11px]">
                         <div
                           title={item.isVeg ? 'Vegetarian' : 'Non-Vegetarian'}
                           className={`w-3.5 h-3.5 border flex items-center justify-center rounded-[3px] shrink-0 ${
@@ -647,6 +660,16 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
                           />
                         </div>
                         <span className="text-[#A1A1AA] font-semibold">{item.category}</span>
+                        {(item.isPopular || item.featured) && (
+                          <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-[#E50914]/20 text-[#E50914] border border-[#E50914]/30">
+                            Popular
+                          </span>
+                        )}
+                        {item.isDemo && (
+                          <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                            Demo data
+                          </span>
+                        )}
                       </div>
 
                       <h3 className="font-bold text-white text-sm sm:text-base leading-snug line-clamp-2">

@@ -32,6 +32,8 @@ import {
   Utensils,
   Shield,
   Smartphone,
+  Image as ImageIcon,
+  Upload,
 } from 'lucide-react';
 import {
   MenuItem,
@@ -40,8 +42,10 @@ import {
   ScreenGridConfig,
   StaffAccount,
   Ticket,
+  CinemaBranding,
 } from '../types';
 import { storeService, getRowLetter } from '../services/store';
+import { CineverseLogo } from './CineverseLogo';
 import { TicketsManagementView } from './TicketsManagementView';
 
 interface AdminPanelProps {
@@ -65,9 +69,9 @@ interface RowQRGroup {
   seats: SeatQRItem[];
 }
 
-const CATEGORIES: Category[] = ['Popcorn', 'Drinks', 'Snacks', 'Combos'];
+const CATEGORIES: Category[] = ['Popcorn', 'Drinks', 'Snacks', 'Combos', 'Desserts'];
 
-type AdminTab = 'menu' | 'screens' | 'qr' | 'staff' | 'analytics' | 'tickets';
+type AdminTab = 'menu' | 'screens' | 'qr' | 'staff' | 'analytics' | 'tickets' | 'branding';
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
   menuItems,
@@ -148,6 +152,59 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   // Analytics
   const [analytics, setAnalytics] = useState(() => storeService.getSalesSummary());
 
+  // Cinema Branding state
+  const [branding, setBranding] = useState<CinemaBranding>(() => storeService.getCinemaBranding());
+  const [brandingLogo, setBrandingLogo] = useState<string | null>(branding.logoUrl);
+  const [brandingName, setBrandingName] = useState(branding.name || 'Cineverse');
+  const [brandingSubtitle, setBrandingSubtitle] = useState(branding.subtitle || 'MULTIPLEX');
+
+  // Demo Actions State
+  const [isStartingDemo, setIsStartingDemo] = useState(false);
+  const [isLoadingDemoMenu, setIsLoadingDemoMenu] = useState(false);
+  const [adminToast, setAdminToast] = useState<string | null>(null);
+
+  const handleStartDemo = async () => {
+    setIsStartingDemo(true);
+    try {
+      // a) loads the sample menu if missing
+      await storeService.loadSampleMenu(true);
+      // b) creates the 3 screens' layouts if missing (Screen 1: 200 seats, Screen 2: 290 seats, Screen 3: 250 seats, 20 seats per row)
+      await storeService.ensureScreensDemoLayout();
+      // c) opens the customer page for Screen 2, Seat F12 in a new tab
+      const segments = window.location.pathname.split('/').filter(Boolean);
+      const repoBase =
+        segments.length > 0 && !['order', 'counter', 'staff', 'admin'].includes(segments[0].toLowerCase())
+          ? '/' + segments[0]
+          : '';
+      const customerUrl = `${window.location.origin}${repoBase}/?screen=2&row=F&seat=12&tab=order`;
+      window.open(customerUrl, '_blank');
+
+      setAdminToast('Demo menu loaded, 3 screen grids configured, and customer page for Screen 2, Seat F12 opened in new tab.');
+      setTimeout(() => setAdminToast(null), 5000);
+    } catch (err) {
+      console.error(err);
+      setAdminToast('Failed to start demo.');
+      setTimeout(() => setAdminToast(null), 3500);
+    } finally {
+      setIsStartingDemo(false);
+    }
+  };
+
+  const handleLoadDemoMenu = async () => {
+    setIsLoadingDemoMenu(true);
+    try {
+      const res = await storeService.loadSampleMenu(true);
+      setAdminToast(res.message || 'Demo menu loaded');
+      setTimeout(() => setAdminToast(null), 4000);
+    } catch (err) {
+      console.error(err);
+      setAdminToast('Failed to load demo menu.');
+      setTimeout(() => setAdminToast(null), 3500);
+    } finally {
+      setIsLoadingDemoMenu(false);
+    }
+  };
+
   // Subscribe to screens & staff
   useEffect(() => {
     const unsubScreens = storeService.subscribeScreens((sc) => {
@@ -156,9 +213,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     const unsubStaff = storeService.subscribeStaff((st) => {
       setStaffList(st);
     });
+    const unsubBranding = storeService.subscribeBranding((b) => {
+      setBranding(b);
+      setBrandingLogo(b.logoUrl);
+      setBrandingName(b.name || 'Cineverse');
+      setBrandingSubtitle(b.subtitle || 'MULTIPLEX');
+    });
     return () => {
       unsubScreens();
       unsubStaff();
+      unsubBranding();
     };
   }, []);
 
@@ -444,6 +508,39 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
+  // Branding Handlers
+  const handleBrandingFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const result = event.target?.result as string;
+      if (result) {
+        setBrandingLogo(result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSaveBranding = () => {
+    storeService.setCinemaBranding({
+      name: brandingName.trim() || 'Cineverse',
+      subtitle: brandingSubtitle.trim() || 'MULTIPLEX',
+      logoUrl: brandingLogo,
+    });
+    setAdminToast('Official Cinema Logo & Brand updated across the entire application!');
+    setTimeout(() => setAdminToast(null), 3000);
+  };
+
+  const handleResetBranding = () => {
+    storeService.resetCinemaBranding();
+    setBrandingLogo(null);
+    setBrandingName('Cineverse');
+    setBrandingSubtitle('MULTIPLEX');
+    setAdminToast('Reset to default Cineverse Multiplex vector logo.');
+    setTimeout(() => setAdminToast(null), 3000);
+  };
+
   if (!isAdmin) {
     return (
       <div className="min-h-[85vh] flex items-center justify-center p-4 bg-zinc-950 text-white">
@@ -510,17 +607,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         {/* Header with Navigation Tabs */}
         <div className="bg-[#15151C] border border-zinc-800 rounded-3xl p-5 sm:p-6 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-[#D4AF37]/15 text-[#D4AF37] border border-[#D4AF37]/30 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5" />
-                Cinema Administration
-              </span>
+            <div className="flex items-center gap-3 mb-2">
+              <CineverseLogo size="sm" showSubtitle={true} subtitle="ADMINISTRATION" />
+              <button
+                onClick={handleStartDemo}
+                disabled={isStartingDemo}
+                title="Loads sample menu, initializes 3 screens (200, 290, 250 seats), and opens Screen 2 Seat F12 in new tab"
+                className="px-3 py-1 rounded-xl bg-gradient-to-r from-amber-500 via-[#D4AF37] to-amber-500 hover:brightness-110 text-black font-extrabold text-xs shadow-md shadow-amber-500/25 transition-all flex items-center gap-1.5 active:scale-95 disabled:opacity-60"
+              >
+                {isStartingDemo ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-black" />
+                ) : (
+                  <Sparkles className="w-3.5 h-3.5 text-black" />
+                )}
+                <span>{isStartingDemo ? 'Starting demo...' : 'Start demo'}</span>
+              </button>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-display font-black tracking-tight text-white mt-1">
-              Cineverse Multiplex Admin
-            </h1>
             <p className="text-xs text-[#A1A1AA] mt-0.5">
-              Manage cinema screens, m x n seat grids, menu inventory, QR sticker exports, and staff access.
+              Manage cinema screens, auditorium seat grids, menu inventory, QR stickers, and staff access.
             </p>
           </div>
 
@@ -606,8 +710,36 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </span>
               )}
             </button>
+
+            <button
+              onClick={() => setActiveTab('branding')}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all min-h-[40px] ${
+                activeTab === 'branding'
+                  ? 'bg-[#E50914] text-white shadow-md shadow-[#E50914]/25'
+                  : 'text-[#A1A1AA] hover:text-white hover:bg-zinc-800'
+              }`}
+            >
+              <ImageIcon className="w-4 h-4 text-[#D4AF37]" />
+              <span>Logo & Brand</span>
+            </button>
           </div>
         </div>
+
+        {/* Live Admin Feedback Banner */}
+        {adminToast && (
+          <div className="p-3.5 rounded-2xl bg-gradient-to-r from-zinc-900 via-[#15151C] to-zinc-900 border border-[#D4AF37]/40 text-white text-xs flex items-center justify-between shadow-xl animate-fade-in">
+            <div className="flex items-center gap-2.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
+              <span className="font-semibold text-zinc-100">{adminToast}</span>
+            </div>
+            <button
+              onClick={() => setAdminToast(null)}
+              className="text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-zinc-800 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* ============================================================ */}
         {/* TAB 1: SCREEN SETUP (m x n grid, row overrides, aisle gaps, disabled seats) */}
@@ -1019,7 +1151,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               Screen {item.screen} • {item.seatLabel}
                             </span>
                             <span className="text-[9px] text-[#A1A1AA] block truncate font-mono">
-                              SeatServe QR
+                              Cineverse Multiplex QR
                             </span>
                           </div>
 
@@ -1067,18 +1199,34 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </p>
               </div>
 
-              <button
-                onClick={handleOpenAdd}
-                className="px-4 py-2.5 rounded-xl bg-[#E50914] hover:bg-[#b80710] font-bold text-xs text-white shadow-lg shadow-[#E50914]/25 transition-all flex items-center gap-2 self-start sm:self-center min-h-[44px]"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Add Menu Item</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
+                <button
+                  onClick={handleLoadDemoMenu}
+                  disabled={isLoadingDemoMenu}
+                  title="Loads the 15 cinema sample menu items"
+                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-[#D4AF37] hover:from-amber-400 hover:to-yellow-400 font-extrabold text-xs text-black shadow-md shadow-amber-500/20 transition-all flex items-center gap-2 min-h-[44px] disabled:opacity-60"
+                >
+                  {isLoadingDemoMenu ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-black" />
+                  ) : (
+                    <Sparkles className="w-4 h-4 text-black" />
+                  )}
+                  <span>{isLoadingDemoMenu ? 'Loading Menu...' : 'Load demo menu'}</span>
+                </button>
+
+                <button
+                  onClick={handleOpenAdd}
+                  className="px-4 py-2.5 rounded-xl bg-[#E50914] hover:bg-[#b80710] font-bold text-xs text-white shadow-lg shadow-[#E50914]/25 transition-all flex items-center gap-2 min-h-[44px]"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Add Menu Item</span>
+                </button>
+              </div>
             </div>
 
             {/* Menu Items Table / Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {menuItems.map((item) => (
+              {Array.from(new Map(menuItems.map((item) => [item.id, item])).values()).map((item) => (
                 <div
                   key={item.id}
                   className={`bg-[#15151C] border rounded-2xl overflow-hidden transition-all flex flex-col justify-between ${
@@ -1092,7 +1240,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       className="w-20 h-20 rounded-xl object-cover bg-zinc-900 shrink-0 border border-zinc-800"
                     />
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 mb-1">
+                      <div className="flex flex-wrap items-center gap-1.5 mb-1">
                         <span
                           className={`w-2 h-2 rounded-full ${
                             item.isVeg ? 'bg-emerald-500' : 'bg-rose-500'
@@ -1101,6 +1249,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         <span className="text-[10px] font-bold text-[#A1A1AA] uppercase">
                           {item.category}
                         </span>
+                        {(item.isPopular || item.featured) && (
+                          <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-[#E50914]/20 text-[#E50914] border border-[#E50914]/30">
+                            Popular
+                          </span>
+                        )}
+                        {item.isDemo && (
+                          <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                            Demo data
+                          </span>
+                        )}
                       </div>
                       <h4 className="text-sm font-bold text-white truncate">{item.name}</h4>
                       <span className="text-xs font-extrabold text-[#D4AF37] block mt-0.5">
@@ -1365,6 +1523,206 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               onSelectCustomerSeat(screen, row, seat);
             }}
           />
+        )}
+
+        {/* ============================================================ */}
+        {/* TAB 7: CINEMA LOGO & BRANDING */}
+        {/* ============================================================ */}
+        {activeTab === 'branding' && (
+          <div className="space-y-6 animate-fade-in">
+            {/* Explanatory Banner */}
+            <div className="bg-[#15151C] border border-[#D4AF37]/40 rounded-3xl p-5 sm:p-6 shadow-xl">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-12 h-12 rounded-2xl bg-[#D4AF37]/15 border border-[#D4AF37]/40 text-[#D4AF37] flex items-center justify-center shadow-lg shadow-[#D4AF37]/20 shrink-0">
+                    <ImageIcon className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg sm:text-xl font-display font-black text-white flex items-center gap-2">
+                      Official Cinema Brand & Logo
+                      <span className="text-[10px] font-mono font-bold bg-[#D4AF37]/20 text-[#D4AF37] px-2 py-0.5 rounded-full border border-[#D4AF37]/30">
+                        GLOBAL SYNC
+                      </span>
+                    </h3>
+                    <p className="text-xs text-[#A1A1AA]">
+                      Upload your exact brand logo image. Changes propagate instantly to the customer menu, splash screen, staff counter, and print receipts.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleResetBranding}
+                    className="px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white font-bold text-xs flex items-center gap-1.5 transition-all"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset to Default</span>
+                  </button>
+
+                  <button
+                    onClick={handleSaveBranding}
+                    className="px-5 py-2.5 rounded-xl bg-[#D4AF37] hover:bg-[#FFE79A] text-black font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-[#D4AF37]/20 transition-all"
+                  >
+                    <Check className="w-4 h-4 stroke-[2.5]" />
+                    <span>Save & Apply Everywhere</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Format Guide Note */}
+              <div className="mt-5 p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-200/90 flex items-start gap-2.5 leading-relaxed">
+                <Sparkles className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <strong className="text-amber-300">Supported Formats: </strong>
+                  PNG (transparent background recommended for dark theme), JPG/JPEG, SVG vector, and WebP. Any resolution from 120x120px up to 2048x2048px is automatically resized and centered.
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Left Column: Image Upload & Fields */}
+              <div className="bg-[#15151C] border border-zinc-800 rounded-3xl p-5 sm:p-6 shadow-xl space-y-5">
+                <h4 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <Upload className="w-4 h-4 text-[#D4AF37]" />
+                  <span>Logo Asset Upload</span>
+                </h4>
+
+                {/* Direct File Upload Area */}
+                <label className="border-2 border-dashed border-zinc-700 hover:border-[#D4AF37] rounded-2xl p-6 flex flex-col items-center justify-center text-center cursor-pointer transition-all bg-[#0B0B0F]/60 hover:bg-[#0B0B0F] group block">
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                    onChange={handleBrandingFileUpload}
+                    className="hidden"
+                  />
+                  <div className="w-12 h-12 rounded-2xl bg-zinc-800 group-hover:bg-[#D4AF37]/20 text-zinc-400 group-hover:text-[#D4AF37] flex items-center justify-center mb-3 transition-colors">
+                    <Upload className="w-6 h-6" />
+                  </div>
+                  <div className="text-sm font-bold text-white group-hover:text-[#D4AF37] transition-colors">
+                    Choose logo file from your device
+                  </div>
+                  <div className="text-xs text-[#A1A1AA] mt-1">
+                    Click to browse PNG, JPG, SVG, or WebP
+                  </div>
+                </label>
+
+                {/* Or Direct Image URL */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-[#A1A1AA] uppercase">
+                    Or Enter Image URL / Base64 Data
+                  </label>
+                  <input
+                    type="text"
+                    value={brandingLogo || ''}
+                    onChange={(e) => setBrandingLogo(e.target.value.trim() || null)}
+                    placeholder="https://example.com/cinema-logo.png"
+                    className="w-full bg-[#0B0B0F] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-[#D4AF37]"
+                  />
+                </div>
+
+                {/* Cinema Name & Tagline */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-[#A1A1AA] uppercase">
+                      Cinema Name
+                    </label>
+                    <input
+                      type="text"
+                      value={brandingName}
+                      onChange={(e) => setBrandingName(e.target.value)}
+                      placeholder="Cineverse"
+                      className="w-full bg-[#0B0B0F] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-[#D4AF37]"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-[#A1A1AA] uppercase">
+                      Subtitle / Tagline
+                    </label>
+                    <input
+                      type="text"
+                      value={brandingSubtitle}
+                      onChange={(e) => setBrandingSubtitle(e.target.value)}
+                      placeholder="MULTIPLEX"
+                      className="w-full bg-[#0B0B0F] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-[#D4AF37]"
+                    />
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="pt-3 flex gap-3">
+                  <button
+                    onClick={handleSaveBranding}
+                    className="flex-1 py-3 px-4 rounded-xl bg-[#D4AF37] hover:bg-[#FFE79A] text-black font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-md shadow-[#D4AF37]/20"
+                  >
+                    <Check className="w-4 h-4 stroke-[3]" />
+                    <span>Apply Logo Everywhere</span>
+                  </button>
+                  <button
+                    onClick={handleResetBranding}
+                    className="px-4 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-xs transition-colors"
+                  >
+                    Reset
+                  </button>
+                </div>
+              </div>
+
+              {/* Right Column: Live Previews */}
+              <div className="bg-[#15151C] border border-zinc-800 rounded-3xl p-5 sm:p-6 shadow-xl space-y-5">
+                <h4 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-[#D4AF37]" />
+                  <span>Real-Time Live Application Preview</span>
+                </h4>
+
+                {/* Preview 1: Header / Navbar */}
+                <div className="bg-[#0B0B0F] p-4 rounded-2xl border border-zinc-800 space-y-2">
+                  <div className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">
+                    Header Navbar View
+                  </div>
+                  <div className="h-14 bg-[#15151C] rounded-xl px-4 flex items-center border border-zinc-800">
+                    <CineverseLogo
+                      size="sm"
+                      customLogoUrl={brandingLogo}
+                      customName={brandingName}
+                      subtitle={brandingSubtitle}
+                    />
+                  </div>
+                </div>
+
+                {/* Preview 2: Splash Welcome */}
+                <div className="bg-[#0B0B0F] p-5 rounded-2xl border border-zinc-800 flex flex-col items-center justify-center text-center space-y-2">
+                  <div className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider mb-2">
+                    Welcome Splash Screen View
+                  </div>
+                  <CineverseLogo
+                    layout="vertical"
+                    size="lg"
+                    customLogoUrl={brandingLogo}
+                    customName={brandingName}
+                    subtitle={brandingSubtitle}
+                  />
+                </div>
+
+                {/* Preview 3: Order Tracker Banner */}
+                <div className="bg-[#0B0B0F] p-4 rounded-2xl border border-zinc-800 space-y-2">
+                  <div className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">
+                    Customer Seat Order Banner
+                  </div>
+                  <div className="p-3 bg-[#15151C] rounded-xl border border-zinc-800 flex items-center justify-between">
+                    <CineverseLogo
+                      size="xs"
+                      customLogoUrl={brandingLogo}
+                      customName={brandingName}
+                      subtitle={brandingSubtitle}
+                    />
+                    <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
+                      Delivering to Seat B7
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
       </div>
 

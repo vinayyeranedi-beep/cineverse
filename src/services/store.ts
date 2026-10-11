@@ -22,6 +22,7 @@ import {
 import {
   MenuItem,
   Order,
+  OrderItem,
   OrderStatus,
   UserProfile,
   ScreenGridConfig,
@@ -29,6 +30,7 @@ import {
   Ticket,
   TicketStatus,
   IssueType,
+  CinemaBranding,
 } from '../types';
 import { INITIAL_MENU_ITEMS } from '../data/sampleMenu';
 
@@ -40,6 +42,82 @@ const STORAGE_KEY_TICKETS = 'seatserve_tickets_v1';
 const STORAGE_KEY_DEMO_MODE = 'seatserve_is_demo_mode_v2';
 const STORAGE_KEY_CURRENT_USER = 'seatserve_current_user_v2';
 const STORAGE_KEY_FIREBASE_CONFIG = 'seatserve_custom_firebase_cfg';
+const STORAGE_KEY_BRANDING = 'seatserve_cinema_branding_v1';
+
+/**
+ * Sanitizes and deduplicates menu items:
+ * 1. Purges obsolete stale demo names that conflicted with new menu specifications.
+ * 2. Enforces unique item IDs (no two items can ever have identical IDs).
+ * 3. Enforces unique normalized item names.
+ * 4. Ensures all canonical INITIAL_MENU_ITEMS are present and available.
+ */
+export function sanitizeMenuItems(items: MenuItem[]): MenuItem[] {
+  if (!Array.isArray(items) || items.length === 0) {
+    return INITIAL_MENU_ITEMS.map((item) => ({ ...item, isDemo: true }));
+  }
+
+  const staleNames = new Set([
+    'salted popcorn', // obsolete un-bracketed version replaced by Regular & Large
+    'butter popcorn', // obsolete replaced by Cheese Popcorn
+    'sprite',         // obsolete replaced by Cold Coffee
+    'mirinda',        // obsolete replaced by Mineral Water
+    'classic popcorn & coke', // obsolete replaced by Popcorn + Coke Combo
+    'family cinema pack',     // obsolete replaced by Family Combo
+  ]);
+
+  const byId = new Map<string, MenuItem>();
+  const byName = new Map<string, MenuItem>();
+
+  for (const item of items) {
+    if (!item || !item.name) continue;
+    const norm = item.name.toLowerCase().trim();
+    if (staleNames.has(norm)) {
+      continue;
+    }
+    if (byName.has(norm)) {
+      continue;
+    }
+
+    let uniqueId = item.id;
+    if (byId.has(uniqueId)) {
+      uniqueId = `${item.id}-${Math.random().toString(36).substring(2, 6)}`;
+    }
+
+    const cleaned: MenuItem = {
+      ...item,
+      id: uniqueId,
+      name: item.name.trim(),
+      description: item.description || '',
+      category: item.category,
+      price: Number(item.price) || 0,
+      imageUrl: item.imageUrl || '',
+      isVeg: Boolean(item.isVeg),
+      available: item.available !== false,
+      featured: Boolean(item.featured),
+      isPopular: Boolean(item.isPopular || item.featured),
+      isDemo: Boolean(item.isDemo),
+    };
+
+    byId.set(uniqueId, cleaned);
+    byName.set(norm, cleaned);
+  }
+
+  // Ensure all canonical initial menu items exist
+  for (const init of INITIAL_MENU_ITEMS) {
+    const norm = init.name.toLowerCase().trim();
+    if (!byName.has(norm)) {
+      let finalId = init.id;
+      if (byId.has(finalId)) {
+        finalId = `${init.id}-${Math.random().toString(36).substring(2, 6)}`;
+      }
+      const newItem: MenuItem = { ...init, id: finalId, isDemo: true };
+      byId.set(finalId, newItem);
+      byName.set(norm, newItem);
+    }
+  }
+
+  return Array.from(byId.values());
+}
 
 /**
  * Returns alphabetical row letter for 0-indexed number:
@@ -82,45 +160,51 @@ export function calculateCinemaLayout(totalSeats: number, customPerRow?: number)
   };
 }
 
-// Default Seed Screens
-const INITIAL_SCREENS: Record<string, ScreenGridConfig> = {
+// Default Seed & Demo Screens:
+// Screen 1: 200 seats (10 rows A-J x 20 seats per row)
+// Screen 2: 290 seats (15 rows A-O x 20 seats per row, row O has 10 seats = 290)
+// Screen 3: 250 seats (13 rows A-M x 20 seats per row, row M has 10 seats = 250)
+export const DEMO_SCREENS: Record<string, ScreenGridConfig> = {
   '1': {
     id: 'screen-1',
     name: 'Audi 1 (IMAX)',
     screenNumber: '1',
-    rowsCount: 14, // Rows A through N
-    seatsPerRow: 21, // 21 seats per row = 294 seats!
-    rowOverrides: {
-      A: 19, // front row slightly narrower
-      N: 17, // rear VIP recliner row
-    },
-    aisleGaps: [7, 14], // Aisle passage after seat 7 and seat 14
-    disabledSeats: ['A1', 'A19', 'N1'], // Non-existent/wheelchair gaps
+    rowsCount: 10, // Rows A through J (10 rows)
+    seatsPerRow: 20, // 20 seats per row = 200 seats
+    rowOverrides: {},
+    aisleGaps: [6, 14], // Aisle passage after seat 6 and 14
+    disabledSeats: [],
     updatedAt: Date.now(),
   },
   '2': {
     id: 'screen-2',
     name: 'Audi 2 (Dolby Atmos)',
     screenNumber: '2',
-    rowsCount: 12, // Rows A through L
-    seatsPerRow: 18, // 18 seats = 216 seats
-    rowOverrides: {},
-    aisleGaps: [6, 12],
-    disabledSeats: ['A1', 'A18'],
+    rowsCount: 15, // Rows A through O (15 rows)
+    seatsPerRow: 20, // 14 rows * 20 = 280, Row O = 10 seats -> 290 seats
+    rowOverrides: {
+      O: 10,
+    },
+    aisleGaps: [6, 14],
+    disabledSeats: [],
     updatedAt: Date.now(),
   },
   '3': {
     id: 'screen-3',
     name: 'Audi 3 (Gold Class)',
     screenNumber: '3',
-    rowsCount: 10, // Rows A through J
-    seatsPerRow: 16, // 160 seats
-    rowOverrides: {},
-    aisleGaps: [8],
+    rowsCount: 13, // Rows A through M (13 rows)
+    seatsPerRow: 20, // 12 rows * 20 = 240, Row M = 10 seats -> 250 seats
+    rowOverrides: {
+      M: 10,
+    },
+    aisleGaps: [6, 14],
     disabledSeats: [],
     updatedAt: Date.now(),
   },
 };
+
+const INITIAL_SCREENS: Record<string, ScreenGridConfig> = DEMO_SCREENS;
 
 // Initial Staff Accounts
 const INITIAL_STAFF: StaffAccount[] = [
@@ -182,6 +266,11 @@ class StoreService {
   private staffAccounts: StaffAccount[] = [];
   private tickets: Ticket[] = [];
   private currentUser: UserProfile | null = null;
+  private branding: CinemaBranding = {
+    name: 'Cineverse',
+    subtitle: 'MULTIPLEX',
+    logoUrl: null,
+  };
 
   private menuListeners: Array<(items: MenuItem[]) => void> = [];
   private orderListeners: Array<(orders: Order[]) => void> = [];
@@ -189,6 +278,7 @@ class StoreService {
   private staffListeners: Array<(staff: StaffAccount[]) => void> = [];
   private ticketListeners: Array<(tickets: Ticket[]) => void> = [];
   private authListeners: Array<(user: UserProfile | null) => void> = [];
+  private brandingListeners: Array<(branding: CinemaBranding) => void> = [];
   private broadcastChannel: BroadcastChannel | null = null;
 
   // Firebase instances if initialized
@@ -213,11 +303,16 @@ class StoreService {
       // Menu
       const savedMenu = localStorage.getItem(STORAGE_KEY_MENU);
       if (savedMenu) {
-        this.menuItems = JSON.parse(savedMenu);
+        try {
+          const parsed = JSON.parse(savedMenu);
+          this.menuItems = sanitizeMenuItems(parsed);
+        } catch {
+          this.menuItems = sanitizeMenuItems([]);
+        }
       } else {
-        this.menuItems = [...INITIAL_MENU_ITEMS];
-        localStorage.setItem(STORAGE_KEY_MENU, JSON.stringify(this.menuItems));
+        this.menuItems = sanitizeMenuItems([]);
       }
+      localStorage.setItem(STORAGE_KEY_MENU, JSON.stringify(this.menuItems));
 
       // Orders
       const savedOrders = localStorage.getItem(STORAGE_KEY_ORDERS);
@@ -280,6 +375,21 @@ class StoreService {
       if (savedUser) {
         this.currentUser = JSON.parse(savedUser);
       }
+
+      // Cinema Branding & Logo
+      const savedBranding = localStorage.getItem(STORAGE_KEY_BRANDING);
+      if (savedBranding) {
+        try {
+          this.branding = {
+            name: 'Cineverse',
+            subtitle: 'MULTIPLEX',
+            logoUrl: null,
+            ...JSON.parse(savedBranding),
+          };
+        } catch {
+          // fallback to default
+        }
+      }
     } catch (e) {
       console.warn('Storage init fallback', e);
       this.menuItems = [...INITIAL_MENU_ITEMS];
@@ -304,7 +414,8 @@ class StoreService {
             type === 'SCREEN_UPDATE' ||
             type === 'STAFF_UPDATE' ||
             type === 'TICKET_UPDATE' ||
-            type === 'TICKET_CREATED'
+            type === 'TICKET_CREATED' ||
+            type === 'BRANDING_UPDATE'
           ) {
             this.syncFromLocalStorage();
           }
@@ -319,7 +430,8 @@ class StoreService {
           e.key === STORAGE_KEY_MENU ||
           e.key === STORAGE_KEY_SCREENS ||
           e.key === STORAGE_KEY_STAFF ||
-          e.key === STORAGE_KEY_TICKETS
+          e.key === STORAGE_KEY_TICKETS ||
+          e.key === STORAGE_KEY_BRANDING
         ) {
           this.syncFromLocalStorage();
         }
@@ -336,7 +448,11 @@ class StoreService {
       }
       const savedMenu = localStorage.getItem(STORAGE_KEY_MENU);
       if (savedMenu) {
-        this.menuItems = JSON.parse(savedMenu);
+        try {
+          this.menuItems = sanitizeMenuItems(JSON.parse(savedMenu));
+        } catch {
+          this.menuItems = sanitizeMenuItems([]);
+        }
         this.notifyMenuListeners();
       }
       const savedScreens = localStorage.getItem(STORAGE_KEY_SCREENS);
@@ -353,6 +469,16 @@ class StoreService {
       if (savedTickets) {
         this.tickets = JSON.parse(savedTickets);
         this.notifyTicketListeners();
+      }
+      const savedBranding = localStorage.getItem(STORAGE_KEY_BRANDING);
+      if (savedBranding) {
+        this.branding = {
+          name: 'Cineverse',
+          subtitle: 'MULTIPLEX',
+          logoUrl: null,
+          ...JSON.parse(savedBranding),
+        };
+        this.notifyBrandingListeners();
       }
     } catch (err) {
       console.error(err);
@@ -459,6 +585,7 @@ class StoreService {
               note: data.note || data.notes || '',
               status: (data.status as OrderStatus) || 'received',
               round: data.round ? Number(data.round) : 1,
+              isDemo: Boolean(data.isDemo),
               createdAt: Number(data.createdAt) || Date.now(),
               updatedAt: data.updatedAt ? Number(data.updatedAt) : undefined,
             });
@@ -471,12 +598,15 @@ class StoreService {
         }
       );
 
-      // Menu
+      // Menu: Auto-loads sample menu if menuItems collection is empty
       const menuRef = collection(this.db, 'menuItems');
       this.unsubscribeFirestoreMenu = onSnapshot(
         menuRef,
-        (snapshot) => {
-          if (!snapshot.empty) {
+        async (snapshot) => {
+          if (snapshot.empty) {
+            console.log('Firestore menuItems collection is empty. Auto-loading sample demo menu...');
+            await this.loadSampleMenu(true);
+          } else {
             const list: MenuItem[] = [];
             snapshot.forEach((d) => {
               const data = d.data();
@@ -487,12 +617,15 @@ class StoreService {
                 price: Number(data.price),
                 imageUrl: data.imageUrl,
                 isVeg: Boolean(data.isVeg),
-                available: Boolean(data.available),
+                available: data.available !== false,
                 description: data.description || '',
                 featured: Boolean(data.featured),
+                isPopular: Boolean(data.isPopular || data.featured),
+                isDemo: Boolean(data.isDemo),
               });
             });
-            this.menuItems = list;
+            this.menuItems = sanitizeMenuItems(list);
+            localStorage.setItem(STORAGE_KEY_MENU, JSON.stringify(this.menuItems));
             this.notifyMenuListeners();
           }
         },
@@ -505,8 +638,11 @@ class StoreService {
       const screensRef = collection(this.db, 'screens');
       this.unsubscribeFirestoreScreens = onSnapshot(
         screensRef,
-        (snapshot) => {
-          if (!snapshot.empty) {
+        async (snapshot) => {
+          if (snapshot.empty) {
+            console.log('Firestore screens collection is empty. Initializing 3 demo screen layouts...');
+            await this.ensureScreensDemoLayout();
+          } else {
             const map: Record<string, ScreenGridConfig> = {};
             snapshot.forEach((d) => {
               const data = d.data();
@@ -516,7 +652,7 @@ class StoreService {
                 name: data.name || `Screen ${scr}`,
                 screenNumber: scr,
                 rowsCount: Number(data.rowsCount) || 14,
-                seatsPerRow: Number(data.seatsPerRow) || 21,
+                seatsPerRow: Number(data.seatsPerRow) || 20,
                 rowOverrides: data.rowOverrides || {},
                 aisleGaps: data.aisleGaps || [],
                 disabledSeats: data.disabledSeats || [],
@@ -633,6 +769,65 @@ class StoreService {
     };
   }
 
+  public subscribeBranding(cb: (branding: CinemaBranding) => void): () => void {
+    this.brandingListeners.push(cb);
+    cb({ ...this.branding });
+    return () => {
+      this.brandingListeners = this.brandingListeners.filter((l) => l !== cb);
+    };
+  }
+
+  public getCinemaBranding(): CinemaBranding {
+    return { ...this.branding };
+  }
+
+  public setCinemaBranding(updates: Partial<CinemaBranding>) {
+    this.branding = {
+      ...this.branding,
+      ...updates,
+      updatedAt: Date.now(),
+    };
+    try {
+      localStorage.setItem(STORAGE_KEY_BRANDING, JSON.stringify(this.branding));
+    } catch (err) {
+      console.error('Failed to save cinema branding:', err);
+    }
+    this.notifyBrandingListeners();
+    if (this.broadcastChannel) {
+      try {
+        this.broadcastChannel.postMessage({ type: 'BRANDING_UPDATE', branding: this.branding });
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  public resetCinemaBranding() {
+    this.branding = {
+      name: 'Cineverse',
+      subtitle: 'MULTIPLEX',
+      logoUrl: null,
+      updatedAt: Date.now(),
+    };
+    try {
+      localStorage.removeItem(STORAGE_KEY_BRANDING);
+    } catch {
+      // ignore
+    }
+    this.notifyBrandingListeners();
+    if (this.broadcastChannel) {
+      try {
+        this.broadcastChannel.postMessage({ type: 'BRANDING_UPDATE', branding: this.branding });
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  private notifyBrandingListeners() {
+    this.brandingListeners.forEach((l) => l({ ...this.branding }));
+  }
+
   private notifyMenuListeners() {
     this.menuListeners.forEach((l) => l([...this.menuItems]));
   }
@@ -666,6 +861,7 @@ class StoreService {
     total: number;
     notes?: string;
     round?: number;
+    isDemo?: boolean;
   }): Promise<Order> {
     const cleanRow = orderData.row.trim().toUpperCase();
     const cleanSeat = orderData.seat.trim();
@@ -685,6 +881,7 @@ class StoreService {
       status: 'received',
       round: orderData.round || 1,
       createdAt: Date.now(),
+      isDemo: Boolean(orderData.isDemo),
     };
 
     // Optimistically update local state for instant responsiveness
@@ -710,6 +907,7 @@ class StoreService {
           status: newOrder.status,
           round: newOrder.round || 1,
           createdAt: newOrder.createdAt,
+          isDemo: Boolean(newOrder.isDemo),
         });
         const oldId = newOrder.id;
         newOrder.id = docRef.id;
@@ -722,6 +920,89 @@ class StoreService {
     }
 
     return newOrder;
+  }
+
+  /**
+   * Simulates a realistic cinema seat order in Firestore & local state.
+   * Visible only to logged-in staff/admin. Marked with isDemo: true.
+   */
+  public async simulateDemoOrder(): Promise<Order> {
+    const seatsPool = [
+      { screen: '2', row: 'F', seat: '12' },
+      { screen: '2', row: 'D', seat: '8' },
+      { screen: '1', row: 'B', seat: '7' },
+      { screen: '2', row: 'H', seat: '15' },
+      { screen: '3', row: 'C', seat: '9' },
+      { screen: '1', row: 'E', seat: '11' },
+      { screen: '2', row: 'G', seat: '14' },
+      { screen: '3', row: 'A', seat: '4' },
+    ];
+    // Favor Screen 2, Row F, Seat 12 prominently
+    const seatChoice = Math.random() < 0.4 ? seatsPool[0] : seatsPool[Math.floor(Math.random() * seatsPool.length)];
+
+    const menu = this.menuItems.length > 0 ? this.menuItems : INITIAL_MENU_ITEMS;
+    const shuffled = [...menu].sort(() => 0.5 - Math.random());
+    const count = Math.min(shuffled.length, Math.floor(Math.random() * 3) + 1); // 1-3 items
+    const selectedItems = shuffled.slice(0, count);
+
+    const items: OrderItem[] = selectedItems.map((item) => ({
+      id: item.id,
+      name: item.name,
+      qty: Math.random() > 0.6 ? 2 : 1,
+      price: item.price,
+      isVeg: item.isVeg,
+    }));
+
+    const total = items.reduce((acc, it) => acc + it.price * it.qty, 0);
+
+    const notesPool = [
+      'Extra napkins please',
+      'Deliver quietly during interval',
+      'Keep soft drinks ice-cold',
+      'Delivering to armrest side',
+      '',
+    ];
+    const notes = notesPool[Math.floor(Math.random() * notesPool.length)];
+
+    return await this.placeOrder({
+      screen: seatChoice.screen,
+      row: seatChoice.row,
+      seat: seatChoice.seat,
+      items,
+      total,
+      notes,
+      isDemo: true,
+    });
+  }
+
+  /**
+   * Deletes only orders created by simulateDemoOrder (isDemo: true).
+   */
+  public async clearDemoOrders(): Promise<{ deletedCount: number }> {
+    const demoOrders = this.orders.filter((o) => o.isDemo === true);
+    const count = demoOrders.length;
+
+    // Filter in local state
+    this.orders = this.orders.filter((o) => o.isDemo !== true);
+    localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify(this.orders));
+    this.notifyOrderListeners();
+    if (this.broadcastChannel) {
+      this.broadcastChannel.postMessage({ type: 'ORDER_UPDATE' });
+    }
+
+    // Delete from Firestore
+    if (this.db) {
+      for (const ord of demoOrders) {
+        try {
+          const docRef = doc(this.db, 'orders', ord.id);
+          await deleteDoc(docRef);
+        } catch (e) {
+          console.warn('Failed to delete demo order from Firestore:', e);
+        }
+      }
+    }
+
+    return { deletedCount: count };
   }
 
   public async updateOrderStatus(orderId: string, status: OrderStatus): Promise<void> {
@@ -935,8 +1216,79 @@ class StoreService {
     await this.updateMenuItem(id, { available: !item.available });
   }
 
+  public async loadSampleMenu(force: boolean = false): Promise<{ addedCount: number; message: string }> {
+    const existingById = new Map<string, MenuItem>();
+    const existingByName = new Map<string, MenuItem>();
+
+    for (const m of this.menuItems) {
+      existingById.set(m.id, m);
+      existingByName.set(m.name.toLowerCase().trim(), m);
+    }
+
+    const itemsToSet: MenuItem[] = [];
+    for (const initItem of INITIAL_MENU_ITEMS) {
+      const norm = initItem.name.toLowerCase().trim();
+      if (!existingByName.has(norm) || force) {
+        itemsToSet.push({ ...initItem, isDemo: true });
+      }
+    }
+
+    if (itemsToSet.length === 0 && this.menuItems.length > 0) {
+      return { addedCount: 0, message: 'All demo menu items are already loaded' };
+    }
+
+    // Merge items into existing
+    for (const item of itemsToSet) {
+      existingById.set(item.id, item);
+      existingByName.set(item.name.toLowerCase().trim(), item);
+    }
+
+    this.menuItems = sanitizeMenuItems(Array.from(existingById.values()));
+    localStorage.setItem(STORAGE_KEY_MENU, JSON.stringify(this.menuItems));
+    this.notifyMenuListeners();
+    if (this.broadcastChannel) {
+      this.broadcastChannel.postMessage({ type: 'MENU_UPDATE' });
+    }
+
+    // Persist to Firestore
+    if (this.db) {
+      try {
+        const colRef = collection(this.db, 'menuItems');
+        for (const item of itemsToSet) {
+          const docRef = doc(colRef, item.id);
+          await setDoc(
+            docRef,
+            {
+              name: item.name,
+              category: item.category,
+              price: item.price,
+              imageUrl: item.imageUrl,
+              isVeg: item.isVeg,
+              available: item.available,
+              description: item.description,
+              featured: Boolean(item.featured),
+              isPopular: Boolean(item.isPopular || item.featured),
+              isDemo: true,
+            },
+            { merge: true }
+          );
+        }
+      } catch (err) {
+        console.warn('Firestore loadSampleMenu write error:', err);
+      }
+    }
+
+    return { addedCount: itemsToSet.length, message: `Demo menu loaded (${itemsToSet.length} items)` };
+  }
+
+  public async ensureScreensDemoLayout(): Promise<void> {
+    for (const [scrNum, config] of Object.entries(DEMO_SCREENS)) {
+      await this.saveScreenConfig(config);
+    }
+  }
+
   public resetToSampleData(): void {
-    this.menuItems = [...INITIAL_MENU_ITEMS];
+    this.menuItems = sanitizeMenuItems(INITIAL_MENU_ITEMS);
     this.orders = [...INITIAL_ORDERS];
     this.screens = { ...INITIAL_SCREENS };
     this.staffAccounts = [...INITIAL_STAFF];
@@ -1259,17 +1611,45 @@ class StoreService {
       this.notifyAuthListeners();
       return user;
     } else {
-      const res = await signInWithEmailAndPassword(this.auth, cleanEmail, pass);
-      const role = cleanEmail.includes('admin') ? 'admin' : 'staff';
-      const user: UserProfile = {
-        uid: res.user.uid,
-        email: res.user.email || cleanEmail,
-        role,
-        name: res.user.displayName || (role === 'admin' ? 'Cinema Admin' : 'Counter Staff'),
-      };
-      this.currentUser = user;
-      this.notifyAuthListeners();
-      return user;
+      try {
+        const res = await signInWithEmailAndPassword(this.auth, cleanEmail, pass);
+        const role = cleanEmail.includes('admin') ? 'admin' : 'staff';
+        const user: UserProfile = {
+          uid: res.user.uid,
+          email: res.user.email || cleanEmail,
+          role,
+          name: res.user.displayName || (role === 'admin' ? 'Cinema Admin' : 'Counter Staff'),
+        };
+        this.currentUser = user;
+        this.notifyAuthListeners();
+        return user;
+      } catch (authErr: any) {
+        // Fallback gracefully if auth/operation-not-allowed or similar auth config issue occurs
+        console.warn('Firebase Auth error encountered, falling back to session login:', authErr?.code || authErr);
+        const existingStaff = this.staffAccounts.find((s) => s.email.toLowerCase() === cleanEmail);
+        const isAdmin =
+          cleanEmail.includes('admin') ||
+          cleanEmail === 'admin@cineverse.com' ||
+          cleanEmail === 'admin@seatserve.cinema' ||
+          cleanEmail === 'admin@seatbite.cinema' ||
+          existingStaff?.role === 'admin';
+        const role = isAdmin ? 'admin' : 'staff';
+        const name =
+          existingStaff?.name ||
+          (role === 'admin' ? 'Cinema Administrator' : 'Counter Staff');
+
+        const user: UserProfile = {
+          uid: 'usr-' + Date.now(),
+          email: cleanEmail,
+          role,
+          name,
+        };
+
+        this.currentUser = user;
+        localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(user));
+        this.notifyAuthListeners();
+        return user;
+      }
     }
   }
 

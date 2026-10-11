@@ -26,6 +26,8 @@ import {
   User,
   ShoppingBag,
   Bell,
+  Trash2,
+  Loader2,
 } from 'lucide-react';
 import {
   Order,
@@ -39,6 +41,7 @@ import {
 import { storeService, getRowLetter } from '../services/store';
 import { soundService } from '../services/sound';
 import { TicketsManagementView } from './TicketsManagementView';
+import { CineverseLogo } from './CineverseLogo';
 
 interface StaffDashboardProps {
   orders: Order[];
@@ -94,6 +97,43 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
   // Tickets state & real-time subscription
   const [tickets, setTickets] = useState<Ticket[]>(() => storeService.getTickets());
   const [staffTab, setStaffTab] = useState<'orders' | 'tickets'>('orders');
+
+  // Demo simulation state
+  const [isSimulating, setIsSimulating] = useState(false);
+  const [isClearingDemo, setIsClearingDemo] = useState(false);
+  const [dashboardToast, setDashboardToast] = useState<string | null>(null);
+
+  const handleSimulateOrder = async () => {
+    setIsSimulating(true);
+    try {
+      const newOrd = await storeService.simulateDemoOrder();
+      soundService.playNewOrderSound();
+      setHighlightOrderId(newOrd.id);
+      setDashboardToast(`Order sent: Screen ${newOrd.screen}, Row ${newOrd.row}, Seat ${newOrd.seat} (₹${newOrd.total})`);
+      setTimeout(() => setDashboardToast(null), 4500);
+    } catch (err) {
+      console.error('Simulation error:', err);
+      setDashboardToast('Failed to simulate demo order.');
+      setTimeout(() => setDashboardToast(null), 3500);
+    } finally {
+      setIsSimulating(false);
+    }
+  };
+
+  const handleClearDemoOrders = async () => {
+    setIsClearingDemo(true);
+    try {
+      const res = await storeService.clearDemoOrders();
+      setDashboardToast(`Cleared ${res.deletedCount} demo orders.`);
+      setTimeout(() => setDashboardToast(null), 4000);
+    } catch (err) {
+      console.error('Clear demo orders error:', err);
+      setDashboardToast('Failed to clear demo orders.');
+      setTimeout(() => setDashboardToast(null), 3500);
+    } finally {
+      setIsClearingDemo(false);
+    }
+  };
 
   useEffect(() => {
     const unsub = storeService.subscribeScreens((sc) => setScreensMap(sc));
@@ -364,25 +404,52 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
       <div className="max-w-[1600px] mx-auto space-y-5">
         {/* Top Counter Bar */}
         <div className="bg-[#15151C] border border-zinc-800 rounded-3xl p-4 sm:p-5 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-[#E50914]/15 text-[#E50914] border border-[#E50914]/30 flex items-center justify-center shadow-lg">
-              <ChefHat className="w-6 h-6 stroke-[2.2]" />
-            </div>
-            <div>
+          <div className="flex items-center gap-4">
+            <CineverseLogo size="md" showSubtitle={true} subtitle="KITCHEN & COUNTER" />
+            <div className="hidden sm:block h-10 w-[1px] bg-zinc-800" />
+            <div className="hidden sm:block">
               <div className="flex items-center gap-2">
-                <h1 className="text-xl sm:text-2xl font-display font-black text-white">
-                  Cinema Counter & Delivery Display
-                </h1>
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                <h2 className="text-sm font-bold text-zinc-300">Auditorium Dispatch</h2>
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
               </div>
               <p className="text-xs text-[#A1A1AA]">
-                Live orders synced with auditorium seat armrest QR codes.
+                Live orders synced with seat armrests
               </p>
             </div>
           </div>
 
-          {/* Action buttons: Manual Order, Sound Test, View Mode, Logout */}
+          {/* Action buttons: Simulate Demo Order, Clear Demo Orders, Manual Order, Sound Test, View Mode, Logout */}
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handleSimulateOrder}
+              disabled={isSimulating}
+              title="Create a realistic random demo order in Firestore"
+              className="px-3.5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-[#D4AF37] hover:from-amber-400 hover:to-yellow-400 text-black font-extrabold text-xs shadow-md shadow-amber-500/20 transition-all flex items-center gap-1.5 min-h-[40px] disabled:opacity-60"
+            >
+              {isSimulating ? (
+                <Loader2 className="w-4 h-4 animate-spin text-black" />
+              ) : (
+                <Sparkles className="w-4 h-4 text-black" />
+              )}
+              <span>{isSimulating ? 'Sending...' : 'Simulate order'}</span>
+            </button>
+
+            {orders.some((o) => o.isDemo) && (
+              <button
+                onClick={handleClearDemoOrders}
+                disabled={isClearingDemo}
+                title="Delete orders created by Simulate"
+                className="px-3 py-2.5 rounded-xl bg-zinc-850 hover:bg-rose-950/60 text-zinc-300 hover:text-rose-300 border border-zinc-700 hover:border-rose-700/50 font-bold text-xs transition-all flex items-center gap-1.5 min-h-[40px] disabled:opacity-60"
+              >
+                {isClearingDemo ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-400" />
+                ) : (
+                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                )}
+                <span>Clear demo orders</span>
+              </button>
+            )}
+
             <button
               onClick={() => setIsManualOrderOpen(true)}
               className="px-4 py-2.5 rounded-xl bg-[#E50914] hover:bg-[#b80710] font-bold text-xs text-white shadow-md shadow-[#E50914]/25 transition-all flex items-center gap-1.5 min-h-[40px]"
@@ -439,6 +506,22 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Live Feedback Toast Notification */}
+        {dashboardToast && (
+          <div className="p-3.5 rounded-2xl bg-gradient-to-r from-zinc-900 via-[#15151C] to-zinc-900 border border-[#D4AF37]/40 text-white text-xs flex items-center justify-between shadow-xl animate-fade-in">
+            <div className="flex items-center gap-2.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
+              <span className="font-semibold text-zinc-100">{dashboardToast}</span>
+            </div>
+            <button
+              onClick={() => setDashboardToast(null)}
+              className="text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-zinc-800 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* Counter Navigation Tabs: Orders vs Tickets with red badge */}
         <div className="flex items-center gap-2 bg-[#15151C] border border-zinc-800 p-1.5 rounded-2xl w-fit">
@@ -599,6 +682,11 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
                               <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-zinc-800 text-[#A1A1AA] uppercase">
                                 Screen {order.screen}
                               </span>
+                              {order.isDemo && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                                  Demo data
+                                </span>
+                              )}
                             </div>
                             <span className="text-[11px] text-[#A1A1AA] flex items-center gap-1 mt-1 font-mono">
                               <Clock className="w-3 h-3 text-zinc-500" />
@@ -1055,7 +1143,7 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
                   Select Snacks & Drinks
                 </label>
                 <div className="max-h-52 overflow-y-auto space-y-2 pr-1">
-                  {menuItems.map((item) => {
+                  {Array.from(new Map(menuItems.map((item) => [item.id, item])).values()).map((item) => {
                     const qty = manualCart[item.id] || 0;
                     return (
                       <div

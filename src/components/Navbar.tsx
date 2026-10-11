@@ -12,6 +12,7 @@ import {
   VolumeX,
   AlertTriangle,
   QrCode,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { ActiveTab, UserProfile } from '../types';
 import { soundService } from '../services/sound';
@@ -26,6 +27,7 @@ interface NavbarProps {
   onOpenStaffLogin: () => void;
   onOpenReportIssue?: () => void;
   onOpenQRTest?: () => void;
+  onOpenLogoCustomizer?: () => void;
   activeOrderCount?: number;
   openTicketsCount?: number;
 }
@@ -37,6 +39,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenStaffLogin,
   onOpenReportIssue,
   onOpenQRTest,
+  onOpenLogoCustomizer,
   activeOrderCount = 0,
   openTicketsCount = 0,
 }) => {
@@ -113,6 +116,19 @@ export const Navbar: React.FC<NavbarProps> = ({
                 >
                   <QrCode className="w-4 h-4" />
                   <span className="hidden sm:inline">Test QR</span>
+                </button>
+              )}
+
+              {/* Upload / Change Logo Button */}
+              {onOpenLogoCustomizer && (
+                <button
+                  onClick={onOpenLogoCustomizer}
+                  aria-label="Upload Cinema Logo"
+                  title="Upload or Change Official Cinema Logo"
+                  className="h-10 px-2.5 sm:px-3 rounded-xl bg-[#15151C] border border-[#D4AF37]/50 text-[#D4AF37] hover:bg-[#D4AF37]/15 hover:shadow-[0_0_14px_rgba(212,175,55,0.25)] flex items-center gap-1.5 transition-all text-xs font-semibold min-h-[40px] active:scale-95"
+                >
+                  <ImageIcon className="w-4 h-4" />
+                  <span className="hidden sm:inline">Change Logo</span>
                 </button>
               )}
 
@@ -262,6 +278,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <AlertTriangle className="w-3.5 h-3.5" />
                   <span>{openTicketsCount} Ticket{openTicketsCount === 1 ? '' : 's'}</span>
                 </div>
+              )}
+
+              {/* Customize Logo button for staff */}
+              {onOpenLogoCustomizer && (
+                <button
+                  onClick={onOpenLogoCustomizer}
+                  title="Upload or Change Cinema Logo"
+                  className="p-2.5 rounded-xl bg-[#15151C] border border-zinc-800 text-[#A1A1AA] hover:text-[#D4AF37] hover:bg-zinc-800 transition-colors min-h-[40px] min-w-[40px] flex items-center justify-center"
+                >
+                  <ImageIcon className="w-4 h-4 text-[#D4AF37]" />
+                </button>
               )}
 
               {/* Sound chime toggle */}

@@ -9,6 +9,7 @@ import {
   Film,
   Sparkles,
 } from 'lucide-react';
+import { CineverseLogo } from './CineverseLogo';
 import { storeService } from '../services/store';
 import { UserProfile } from '../types';
 
@@ -84,17 +85,7 @@ export const StaffLoginModal: React.FC<StaffLoginModalProps> = ({
         {/* Top Header */}
         <div className="flex items-center justify-between pb-4 border-b border-zinc-800">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-[#D4AF37]/15 text-[#D4AF37] border border-[#D4AF37]/30 flex items-center justify-center shadow-lg shadow-[#D4AF37]/10">
-              <Lock className="w-5 h-5 stroke-[2.2]" />
-            </div>
-            <div>
-              <h2 id="staff-login-title" className="text-xl font-bold tracking-tight text-white">
-                Staff Login
-              </h2>
-              <p className="text-[11px] text-[#A1A1AA]">
-                Cinema kitchen display & management portal
-              </p>
-            </div>
+            <CineverseLogo size="sm" showSubtitle={true} subtitle="STAFF PORTAL" />
           </div>
 
           <button

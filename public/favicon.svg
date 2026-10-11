@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <defs>
+    <linearGradient id="goldMetallic" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFF2A8" />
+      <stop offset="25%" stop-color="#E5B942" />
+      <stop offset="55%" stop-color="#D4AF37" />
+      <stop offset="85%" stop-color="#B8861B" />
+      <stop offset="100%" stop-color="#7B570A" />
+    </linearGradient>
+    <linearGradient id="beamGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FFF5B8" stop-opacity="0.9" />
+      <stop offset="100%" stop-color="#D4AF37" stop-opacity="0" />
+    </linearGradient>
+    <linearGradient id="badgeDark" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1A1A24" />
+      <stop offset="100%" stop-color="#0E0E14" />
+    </linearGradient>
+    <linearGradient id="badgeBorder" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFE79A" />
+      <stop offset="50%" stop-color="#D4AF37" />
+      <stop offset="100%" stop-color="#805B0D" />
+    </linearGradient>
+  </defs>
+
+  <rect x="2" y="2" width="116" height="116" rx="28" fill="url(#badgeDark)" stroke="url(#badgeBorder)" stroke-width="3" />
+  <rect x="5" y="5" width="110" height="110" rx="25" fill="none" stroke="url(#goldMetallic)" stroke-width="0.8" opacity="0.35" />
+
+  <polygon points="14,38 32,60 14,82 23,82 41,60 23,38" fill="url(#goldMetallic)" opacity="0.7" />
+  <polygon points="27,38 45,60 27,82 36,82 54,60 36,38" fill="url(#goldMetallic)" />
+
+  <g transform="translate(64, 34)">
+    <circle cx="0" cy="0" r="14.5" fill="none" stroke="url(#goldMetallic)" stroke-width="3.5" />
+    <circle cx="0" cy="0" r="4.5" fill="url(#goldMetallic)" />
+    <circle cx="0" cy="-7.5" r="2.2" fill="url(#goldMetallic)" />
+    <circle cx="-6.5" cy="4" r="2.2" fill="url(#goldMetallic)" />
+    <circle cx="6.5" cy="4" r="2.2" fill="url(#goldMetallic)" />
+  </g>
+
+  <g transform="translate(93, 34)">
+    <circle cx="0" cy="0" r="14.5" fill="none" stroke="url(#goldMetallic)" stroke-width="3.5" />
+    <circle cx="0" cy="0" r="4.5" fill="url(#goldMetallic)" />
+    <circle cx="0" cy="-7.5" r="2.2" fill="url(#goldMetallic)" />
+    <circle cx="-6.5" cy="4" r="2.2" fill="url(#goldMetallic)" />
+    <circle cx="6.5" cy="4" r="2.2" fill="url(#goldMetallic)" />
+  </g>
+
+  <path d="M64 20 Q78.5 25 93 20" fill="none" stroke="url(#goldMetallic)" stroke-width="2.5" stroke-linecap="round" />
+
+  <rect x="52" y="49" width="46" height="30" rx="5" fill="url(#goldMetallic)" />
+  <line x1="58" y1="56" x2="72" y2="56" stroke="#15151C" stroke-width="2.2" stroke-linecap="round" />
+  <line x1="58" y1="62" x2="72" y2="62" stroke="#15151C" stroke-width="2.2" stroke-linecap="round" />
+  <circle cx="85" cy="64" r="5" fill="#15151C" />
+  <circle cx="85" cy="64" r="2.5" fill="url(#goldMetallic)" />
+
+  <polygon points="98,54 113,46 113,76 98,68" fill="url(#goldMetallic)" />
+  <polygon points="113,48 119,45 119,77 113,74" fill="url(#beamGlow)" />
+</svg>

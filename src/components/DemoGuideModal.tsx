@@ -141,7 +141,7 @@ service cloud.firestore {
               <BookOpen className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white">SeatBite Guide & Setup</h2>
+              <h2 className="text-lg font-bold text-white">Cineverse Multiplex Guide & Setup</h2>
               <p className="text-xs text-zinc-400">
                 Live demo script, pre-flight test checklist & Firebase configuration
               </p>

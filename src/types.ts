@@ -1,4 +1,4 @@
-export type Category = 'Popcorn' | 'Drinks' | 'Snacks' | 'Combos';
+export type Category = 'Popcorn' | 'Drinks' | 'Snacks' | 'Combos' | 'Desserts';
 
 export interface MenuItem {
   id: string;
@@ -10,6 +10,8 @@ export interface MenuItem {
   available: boolean;
   description: string;
   featured?: boolean;
+  isPopular?: boolean;
+  isDemo?: boolean;
 }
 
 export interface OrderItem {
@@ -36,6 +38,7 @@ export interface Order {
   createdAt: number;
   updatedAt?: number;
   round?: number; // e.g. Round 1, Round 2 (allows ordering up to multiple times)
+  isDemo?: boolean;
 }
 
 export interface ScreenGridConfig {
@@ -90,5 +93,12 @@ export interface Ticket {
   status: TicketStatus;
   staffReply?: string;
   createdAt: number;
+  updatedAt?: number;
+}
+
+export interface CinemaBranding {
+  name: string;
+  subtitle: string;
+  logoUrl: string | null; // data URL, SVG string, or image URL
   updatedAt?: number;
 }
