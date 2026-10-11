@@ -10,6 +10,7 @@ import {
   onSnapshot,
   query,
   orderBy,
+  getDocs,
 } from 'firebase/firestore';
 import {
   getAuth,
@@ -159,7 +160,19 @@ export interface FirebaseConfigType {
   storageBucket?: string;
   messagingSenderId?: string;
   appId?: string;
+  firestoreDatabaseId?: string;
 }
+
+// Built-in provisioned Firebase configuration for cross-device real-time sync
+export const DEFAULT_FIREBASE_CONFIG: FirebaseConfigType = {
+  projectId: 'cryptic-dynamo-h6rpq',
+  appId: '1:74019311671:web:21e5939937a35b35a3efb2',
+  apiKey: 'AIzaSyChVEkUawOQp9UMj4LOD9C9yggg0Ju5DTU',
+  authDomain: 'cryptic-dynamo-h6rpq.firebaseapp.com',
+  firestoreDatabaseId: 'ai-studio-seatbitecinemaqr-82234bbb-a8e9-4f29-83d0-2c863e1bb94b',
+  storageBucket: 'cryptic-dynamo-h6rpq.firebasestorage.app',
+  messagingSenderId: '74019311671',
+};
 
 class StoreService {
   private isDemo: boolean = true;
@@ -346,14 +359,14 @@ class StoreService {
     }
   }
 
-  public getSavedFirebaseConfig(): FirebaseConfigType | null {
+  public getSavedFirebaseConfig(): FirebaseConfigType {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_FIREBASE_CONFIG);
       if (saved) return JSON.parse(saved);
     } catch {
       // ignore
     }
-    return null;
+    return DEFAULT_FIREBASE_CONFIG;
   }
 
   public saveFirebaseConfig(cfg: FirebaseConfigType | null) {
@@ -370,7 +383,7 @@ class StoreService {
   }
 
   public checkAndInitFirebase(): boolean {
-    const config = this.getSavedFirebaseConfig();
+    const config = this.getSavedFirebaseConfig() || DEFAULT_FIREBASE_CONFIG;
     if (!config || !config.apiKey || !config.projectId) {
       this.isDemo = true;
       return false;
@@ -378,7 +391,9 @@ class StoreService {
 
     try {
       const app = getApps().length > 0 ? getApp() : initializeApp(config);
-      this.db = getFirestore(app);
+      this.db = config.firestoreDatabaseId
+        ? getFirestore(app, config.firestoreDatabaseId)
+        : getFirestore(app);
       this.auth = getAuth(app);
       this.isDemo = false;
 
@@ -394,15 +409,23 @@ class StoreService {
           };
           this.currentUser = profile;
         } else {
-          this.currentUser = null;
+          // If not logged into Firebase Auth, preserve locally logged-in staff
+          const savedUser = localStorage.getItem(STORAGE_KEY_CURRENT_USER);
+          if (savedUser) {
+            try {
+              this.currentUser = JSON.parse(savedUser);
+            } catch {
+              this.currentUser = null;
+            }
+          }
         }
         this.notifyAuthListeners();
       });
 
       return true;
     } catch (err) {
-      console.warn('Firebase init error, continuing in Demo Mode:', err);
-      this.isDemo = true;
+      console.warn('Firebase init error, continuing with local fallback:', err);
+      this.isDemo = false;
       return false;
     }
   }
@@ -435,6 +458,7 @@ class StoreService {
               notes: data.notes || data.note || '',
               note: data.note || data.notes || '',
               status: (data.status as OrderStatus) || 'received',
+              round: data.round ? Number(data.round) : 1,
               createdAt: Number(data.createdAt) || Date.now(),
               updatedAt: data.updatedAt ? Number(data.updatedAt) : undefined,
             });
@@ -641,6 +665,7 @@ class StoreService {
     items: Order['items'];
     total: number;
     notes?: string;
+    round?: number;
   }): Promise<Order> {
     const cleanRow = orderData.row.trim().toUpperCase();
     const cleanSeat = orderData.seat.trim();
@@ -658,18 +683,20 @@ class StoreService {
       notes: orderData.notes || '',
       note: orderData.notes || '',
       status: 'received',
+      round: orderData.round || 1,
       createdAt: Date.now(),
     };
 
-    if (this.isDemo || !this.db) {
-      this.orders = [newOrder, ...this.orders];
-      localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify(this.orders));
-      this.notifyOrderListeners();
-      if (this.broadcastChannel) {
-        this.broadcastChannel.postMessage({ type: 'ORDER_PLACED', payload: newOrder });
-      }
-      return newOrder;
-    } else {
+    // Optimistically update local state for instant responsiveness
+    this.orders = [newOrder, ...this.orders];
+    localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify(this.orders));
+    this.notifyOrderListeners();
+    if (this.broadcastChannel) {
+      this.broadcastChannel.postMessage({ type: 'ORDER_PLACED', payload: newOrder });
+    }
+
+    // Persist to Google Cloud Firestore for real-time cross-phone syncing
+    if (this.db) {
       try {
         const colRef = collection(this.db, 'orders');
         const docRef = await addDoc(colRef, {
@@ -681,42 +708,41 @@ class StoreService {
           total: newOrder.total,
           notes: newOrder.notes,
           status: newOrder.status,
+          round: newOrder.round || 1,
           createdAt: newOrder.createdAt,
         });
+        const oldId = newOrder.id;
         newOrder.id = docRef.id;
-        return newOrder;
-      } catch (err) {
-        console.error('Firestore placeOrder fallback to local:', err);
-        this.orders = [newOrder, ...this.orders];
+        this.orders = this.orders.map((o) => (o.id === oldId ? newOrder : o));
         localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify(this.orders));
         this.notifyOrderListeners();
-        return newOrder;
+      } catch (err) {
+        console.warn('Firestore placeOrder fallback to local:', err);
       }
     }
+
+    return newOrder;
   }
 
   public async updateOrderStatus(orderId: string, status: OrderStatus): Promise<void> {
     const now = Date.now();
-    if (this.isDemo || !this.db) {
-      this.orders = this.orders.map((o) =>
-        o.id === orderId ? { ...o, status, updatedAt: now } : o
-      );
-      localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify(this.orders));
-      this.notifyOrderListeners();
-      if (this.broadcastChannel) {
-        this.broadcastChannel.postMessage({ type: 'ORDER_UPDATE', payload: { orderId, status } });
-      }
-    } else {
+    // Optimistic local update
+    this.orders = this.orders.map((o) =>
+      o.id === orderId ? { ...o, status, updatedAt: now } : o
+    );
+    localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify(this.orders));
+    this.notifyOrderListeners();
+    if (this.broadcastChannel) {
+      this.broadcastChannel.postMessage({ type: 'ORDER_UPDATE', payload: { orderId, status } });
+    }
+
+    // Update in Google Cloud Firestore for cross-phone sync
+    if (this.db) {
       try {
         const docRef = doc(this.db, 'orders', orderId);
         await updateDoc(docRef, { status, updatedAt: now });
       } catch (err) {
-        console.error('Firestore updateOrderStatus fallback to local:', err);
-        this.orders = this.orders.map((o) =>
-          o.id === orderId ? { ...o, status, updatedAt: now } : o
-        );
-        localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify(this.orders));
-        this.notifyOrderListeners();
+        console.warn('Firestore updateOrderStatus fallback to local:', err);
       }
     }
   }
@@ -727,6 +753,20 @@ class StoreService {
     const cleanSeat = String(seat).trim();
 
     return this.orders.find(
+      (o) =>
+        String(o.screen).trim() === cleanScreen &&
+        String(o.row).trim().toUpperCase() === cleanRow &&
+        String(o.seat).trim() === cleanSeat &&
+        o.status !== 'delivered'
+    );
+  }
+
+  public getAllActiveOrdersBySeat(screen: string, row: string, seat: string): Order[] {
+    const cleanScreen = String(screen).trim();
+    const cleanRow = String(row).trim().toUpperCase();
+    const cleanSeat = String(seat).trim();
+
+    return this.orders.filter(
       (o) =>
         String(o.screen).trim() === cleanScreen &&
         String(o.row).trim().toUpperCase() === cleanRow &&
@@ -1146,6 +1186,17 @@ class StoreService {
     this.orders = [];
     localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify([]));
     this.notifyOrderListeners();
+    if (this.db) {
+      try {
+        const colRef = collection(this.db, 'orders');
+        const snap = await getDocs(colRef);
+        for (const d of snap.docs) {
+          await deleteDoc(d.ref);
+        }
+      } catch (e) {
+        console.warn('Clear Firestore orders error:', e);
+      }
+    }
     if (this.broadcastChannel) {
       try {
         this.broadcastChannel.postMessage({ type: 'ORDER_UPDATE' });
@@ -1159,6 +1210,17 @@ class StoreService {
     this.tickets = [];
     localStorage.setItem(STORAGE_KEY_TICKETS, JSON.stringify([]));
     this.notifyTicketListeners();
+    if (this.db) {
+      try {
+        const colRef = collection(this.db, 'tickets');
+        const snap = await getDocs(colRef);
+        for (const d of snap.docs) {
+          await deleteDoc(d.ref);
+        }
+      } catch (e) {
+        console.warn('Clear Firestore tickets error:', e);
+      }
+    }
     if (this.broadcastChannel) {
       try {
         this.broadcastChannel.postMessage({ type: 'TICKET_UPDATE' });

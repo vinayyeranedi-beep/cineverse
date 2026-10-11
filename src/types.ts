@@ -35,6 +35,7 @@ export interface Order {
   status: OrderStatus;
   createdAt: number;
   updatedAt?: number;
+  round?: number; // e.g. Round 1, Round 2 (allows ordering up to multiple times)
 }
 
 export interface ScreenGridConfig {

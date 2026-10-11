@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { motion } from 'motion/react';
+import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   Search,
   Plus,
@@ -80,6 +80,25 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
 
   const cartTotal = calculateTotal(menuItems);
 
+  // Maximum allowed orders per movie session for this seat
+  const MAX_ORDERS_PER_SEAT = 5;
+
+  // Animation triggers when cart items increase
+  const prevCountRef = useRef(totalItemsCount);
+  const [countBounceKey, setCountBounceKey] = useState(0);
+  const [justAddedAnimation, setJustAddedAnimation] = useState(false);
+
+  useEffect(() => {
+    if (totalItemsCount > prevCountRef.current) {
+      setCountBounceKey((prev) => prev + 1);
+      setJustAddedAnimation(true);
+      const timer = setTimeout(() => setJustAddedAnimation(false), 900);
+      prevCountRef.current = totalItemsCount;
+      return () => clearTimeout(timer);
+    }
+    prevCountRef.current = totalItemsCount;
+  }, [totalItemsCount]);
+
   // Clean seat number & label e.g. "B7"
   const cleanSeatNum = seat.replace(/^[A-Za-z]+/, '') || seat;
   const cleanSeatLabel = `${row.toUpperCase()}${cleanSeatNum}`;
@@ -105,20 +124,32 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
 
   const activeSeatOrders = seatOrders.filter((o: Order) => o.status !== 'delivered');
   const pastSeatOrders = seatOrders.filter((o: Order) => o.status === 'delivered');
-  const latestActiveOrder = activeSeatOrders[0];
 
-  // Check if current seat has an active order
-  const activeOrder =
+  // Customer can order up to 5 times per movie session!
+  const currentRound = seatOrders.length + 1;
+  const canOrderMore = seatOrders.length < MAX_ORDERS_PER_SEAT;
+
+  // Selected order tab for multi-order live tracking
+  const [selectedActiveOrderId, setSelectedActiveOrderId] = useState<string | null>(null);
+
+  // Fallback to active order from store if seat has active order
+  const storeActiveOrder =
     storeService.getActiveOrderBySeat(screen, row, cleanSeatNum) ||
     storeService.getActiveOrderBySeat(screen, row, seat);
 
+  // Currently displayed active order in live tracker
+  const currentTrackedOrder =
+    (selectedActiveOrderId ? activeSeatOrders.find((o) => o.id === selectedActiveOrderId) : null) ||
+    activeSeatOrders[0] ||
+    storeActiveOrder;
+
   // Status audio/confetti effects
   useEffect(() => {
-    if (!activeOrder) return;
-    if (activeOrder.status === 'on_the_way') {
+    if (!currentTrackedOrder) return;
+    if (currentTrackedOrder.status === 'on_the_way') {
       soundService.playReadySound();
-    } else if (activeOrder.status === 'delivered' && lastDeliveredOrderId !== activeOrder.id) {
-      setLastDeliveredOrderId(activeOrder.id);
+    } else if (currentTrackedOrder.status === 'delivered' && lastDeliveredOrderId !== currentTrackedOrder.id) {
+      setLastDeliveredOrderId(currentTrackedOrder.id);
       try {
         confetti({
           particleCount: 80,
@@ -129,7 +160,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
         // ignore
       }
     }
-  }, [activeOrder?.status, activeOrder?.id, lastDeliveredOrderId]);
+  }, [currentTrackedOrder?.status, currentTrackedOrder?.id, lastDeliveredOrderId]);
 
   // Filter items
   const filteredItems = menuItems.filter((item) => {
@@ -144,6 +175,14 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
   const handlePlaceOrder = async () => {
     if (totalItemsCount === 0 || isSubmitting) return;
     setOrderError('');
+
+    // Check maximum orders limit
+    if (!canOrderMore) {
+      setOrderError(
+        `You have reached the maximum limit of ${MAX_ORDERS_PER_SEAT} orders for this movie session. Please contact cinema staff for assistance.`
+      );
+      return;
+    }
 
     // 1. Block ordering if seat is missing or invalid
     if (!screen || !row || !cleanSeatNum) {
@@ -189,7 +228,10 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
         seat: cleanSeatNum,
         items: orderItems,
         total: cartTotal,
-        notes: customerNotes.trim() || undefined,
+        notes: customerNotes.trim()
+          ? `[Round ${currentRound}] ${customerNotes.trim()}`
+          : `Round ${currentRound}`,
+        round: currentRound,
       });
 
       // Remember order in session storage
@@ -200,13 +242,18 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
         setSessionOrderIds(nextIds);
       }
 
+      // Automatically select newest placed order in live tracker
+      setSelectedActiveOrderId(placed.id);
+
       // Clear cart on success & return to menu
       clearCart();
       closeCart();
       soundService.playNewOrderSound();
 
-      setToastMessage(`Order #${placed.orderId || placed.id.substring(0, 6)} placed for Seat ${cleanSeatLabel}!`);
-      setTimeout(() => setToastMessage(null), 4500);
+      setToastMessage(
+        `Order #${placed.orderId || placed.id.substring(0, 6)} (Round ${currentRound}) placed for Seat ${cleanSeatLabel}!`
+      );
+      setTimeout(() => setToastMessage(null), 5000);
     } catch (err: unknown) {
       console.error('Order placement error:', err);
       const msg = err instanceof Error ? err.message : 'Could not place order. Please try again.';
@@ -310,15 +357,70 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
       </section>
 
       <div className="max-w-4xl mx-auto px-4 pt-4">
+        {/* MULTI-ORDER ROUND NOTICE (If seat has placed an order and can order more) */}
+        {seatOrders.length > 0 && canOrderMore && (
+          <div className="mb-4 p-3 rounded-xl bg-[#D4AF37]/10 border border-[#D4AF37]/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="px-2 py-0.5 rounded-md bg-[#D4AF37] text-black font-extrabold text-[11px] uppercase tracking-wider">
+                Round {currentRound} of {MAX_ORDERS_PER_SEAT}
+              </span>
+              <span className="text-zinc-300">
+                You can order up to {MAX_ORDERS_PER_SEAT} times during your movie! Add more popcorn or soft drinks anytime.
+              </span>
+            </div>
+            <span className="text-[#D4AF37] font-semibold text-[11px] shrink-0">
+              {activeSeatOrders.length} active {activeSeatOrders.length === 1 ? 'order' : 'orders'} in kitchen
+            </span>
+          </div>
+        )}
+
         {/* LIVE ORDER TRACKER BANNER (If seat has active order) */}
-        {activeOrder && (
+        {currentTrackedOrder && (
           <motion.div
-            key={`${activeOrder.id}-${activeOrder.status}`}
+            key={`${currentTrackedOrder.id}-${currentTrackedOrder.status}`}
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3, ease: 'easeOut' }}
             className="mb-6 p-4 sm:p-5 rounded-2xl bg-[#15151C] border border-[#D4AF37]/50 shadow-xl shadow-black/40"
           >
+            {/* Multi-Order Tabs Switcher (If multiple active orders exist) */}
+            {activeSeatOrders.length > 1 && (
+              <div className="mb-3.5 pb-3 border-b border-zinc-800 flex items-center gap-2 overflow-x-auto scrollbar-none">
+                <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider shrink-0">
+                  Active Orders:
+                </span>
+                {activeSeatOrders.map((ord, idx) => {
+                  const isSelected = ord.id === currentTrackedOrder.id;
+                  const roundNum = ord.round || idx + 1;
+                  return (
+                    <button
+                      key={ord.id}
+                      onClick={() => setSelectedActiveOrderId(ord.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+                        isSelected
+                          ? 'bg-[#E50914] text-white shadow-md shadow-[#E50914]/30 ring-1 ring-[#E50914]'
+                          : 'bg-zinc-800/80 text-zinc-400 hover:text-white hover:bg-zinc-700'
+                      }`}
+                    >
+                      <span>Round {roundNum}</span>
+                      <span className="text-[10px] opacity-80">#{ord.orderId || ord.id.substring(0, 5)}</span>
+                      <span
+                        className={`w-2 h-2 rounded-full ${
+                          ord.status === 'delivered'
+                            ? 'bg-emerald-400'
+                            : ord.status === 'on_the_way'
+                            ? 'bg-blue-400'
+                            : ord.status === 'preparing'
+                            ? 'bg-amber-400'
+                            : 'bg-rose-400'
+                        }`}
+                      />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-zinc-800">
               <div className="flex items-center gap-3">
                 <span className="relative flex h-3.5 w-3.5">
@@ -326,13 +428,20 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
                   <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-[#E50914]"></span>
                 </span>
                 <div>
-                  <h3 className="font-bold text-white text-base">
-                    Active Order #{activeOrder.orderId || activeOrder.id.substring(0, 7)}
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-white text-base">
+                      Active Order #{currentTrackedOrder.orderId || currentTrackedOrder.id.substring(0, 7)}
+                    </h3>
+                    {currentTrackedOrder.round && (
+                      <span className="px-2 py-0.5 rounded-full bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/40 text-[10px] font-bold">
+                        Round {currentTrackedOrder.round} of {MAX_ORDERS_PER_SEAT}
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-[#A1A1AA]">
-                    Screen {activeOrder.screen} • Seat {activeOrder.row.toUpperCase()}
-                    {activeOrder.seat.replace(/^[A-Za-z]+/, '') || activeOrder.seat} • Placed at{' '}
-                    {new Date(activeOrder.createdAt).toLocaleTimeString([], {
+                    Screen {currentTrackedOrder.screen} • Seat {currentTrackedOrder.row.toUpperCase()}
+                    {currentTrackedOrder.seat.replace(/^[A-Za-z]+/, '') || currentTrackedOrder.seat} • Placed at{' '}
+                    {new Date(currentTrackedOrder.createdAt).toLocaleTimeString([], {
                       hour: '2-digit',
                       minute: '2-digit',
                     })}
@@ -343,7 +452,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
               <div className="flex items-center gap-3">
                 {onOpenReportIssue && (
                   <button
-                    onClick={() => onOpenReportIssue(activeOrder.orderId || activeOrder.id, 'Order delayed')}
+                    onClick={() => onOpenReportIssue(currentTrackedOrder.orderId || currentTrackedOrder.id, 'Order delayed')}
                     className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700 text-xs font-semibold flex items-center gap-1.5 transition-colors"
                   >
                     <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
@@ -353,7 +462,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
                 <div className="text-right">
                   <span className="text-xs text-[#A1A1AA] block">Order Amount</span>
                   <span className="font-display font-extrabold text-[#D4AF37] text-lg">
-                    ₹{activeOrder.total}
+                    ₹{currentTrackedOrder.total}
                   </span>
                 </div>
               </div>
@@ -366,7 +475,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
                 <div className="flex flex-col items-center">
                   <div
                     className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
-                      ['received', 'preparing', 'on_the_way', 'delivered'].includes(activeOrder.status)
+                      ['received', 'preparing', 'on_the_way', 'delivered'].includes(currentTrackedOrder.status)
                         ? 'bg-[#E50914] text-white shadow-md shadow-[#E50914]/30'
                         : 'bg-zinc-800 text-zinc-500'
                     }`}
@@ -381,7 +490,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
                 <div className="flex flex-col items-center">
                   <div
                     className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
-                      ['preparing', 'on_the_way', 'delivered'].includes(activeOrder.status)
+                      ['preparing', 'on_the_way', 'delivered'].includes(currentTrackedOrder.status)
                         ? 'bg-[#2563EB] text-white shadow-md shadow-[#2563EB]/30'
                         : 'bg-zinc-800 text-zinc-500'
                     }`}
@@ -396,7 +505,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
                 <div className="flex flex-col items-center">
                   <div
                     className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
-                      ['on_the_way', 'delivered'].includes(activeOrder.status)
+                      ['on_the_way', 'delivered'].includes(currentTrackedOrder.status)
                         ? 'bg-[#2563EB] text-white shadow-md shadow-[#2563EB]/30 ring-2 ring-[#2563EB]/60'
                         : 'bg-zinc-800 text-zinc-500'
                     }`}
@@ -411,7 +520,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
                 <div className="flex flex-col items-center">
                   <div
                     className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
-                      activeOrder.status === 'delivered'
+                      currentTrackedOrder.status === 'delivered'
                         ? 'bg-[#22C55E] text-white font-bold'
                         : 'bg-zinc-800 text-zinc-500'
                     }`}
@@ -428,7 +537,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
             <div className="bg-[#0B0B0F] rounded-xl p-3.5 text-xs border border-zinc-800">
               <div className="text-[#A1A1AA] font-semibold mb-1.5">Items in preparation:</div>
               <div className="flex flex-wrap gap-2">
-                {activeOrder.items.map((it, idx) => (
+                {currentTrackedOrder.items.map((it, idx) => (
                   <span
                     key={idx}
                     className="bg-[#15151C] text-white px-2.5 py-1 rounded-lg font-mono text-[11px] border border-zinc-800"
@@ -437,9 +546,9 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
                   </span>
                 ))}
               </div>
-              {activeOrder.notes && (
+              {currentTrackedOrder.notes && (
                 <p className="mt-2 text-[#D4AF37] italic text-[11px]">
-                  Special instruction: "{activeOrder.notes}"
+                  Special instruction: "{currentTrackedOrder.notes}"
                 </p>
               )}
             </div>
@@ -559,10 +668,10 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
                           /* Add Button */
                           <button
                             onClick={() => addItem(item)}
-                            disabled={Boolean(activeOrder)}
-                            title={activeOrder ? 'You have an order in progress' : 'Add to cart'}
+                            disabled={!canOrderMore}
+                            title={!canOrderMore ? `Maximum ${MAX_ORDERS_PER_SEAT} orders reached` : 'Add to cinema cart'}
                             className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 min-h-[44px] min-w-[76px] justify-center ${
-                              activeOrder
+                              !canOrderMore
                                 ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
                                 : 'bg-[#E50914] hover:bg-[#c80812] text-white shadow-md shadow-[#E50914]/25 active:scale-95'
                             }`}
