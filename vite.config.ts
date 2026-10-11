@@ -4,8 +4,25 @@ import path from 'path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
+  // Determine base path:
+  // 1. If BASE_PATH is supplied by GitHub Actions configure-pages, use it.
+  // 2. If GITHUB_REPOSITORY (e.g. "username/cineverse") is present, use "/<repo>/".
+  // 3. Otherwise default to relative "./" for portable local and preview hosting.
+  let base = './';
+  if (process.env.BASE_PATH) {
+    const bp = process.env.BASE_PATH.trim();
+    base = bp.endsWith('/') ? bp : `${bp}/`;
+  } else if (process.env.GITHUB_REPOSITORY) {
+    const repo = process.env.GITHUB_REPOSITORY.split('/')[1];
+    if (repo && !repo.endsWith('.github.io')) {
+      base = `/${repo}/`;
+    } else {
+      base = '/';
+    }
+  }
+
   return {
-    base: './',
+    base,
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

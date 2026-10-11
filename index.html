@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -12,25 +12,29 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" crossorigin href="./assets/index.css">
-  </head>
-  <body class="bg-zinc-950 text-zinc-100 antialiased selection:bg-amber-500 selection:text-zinc-950">
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-    <script type="module">
-      // Resilient fallback for static GitHub Pages deployments:
-      // If uncompiled /src/main.tsx cannot be loaded by static hosting, automatically load pre-bundled assets
-      setTimeout(function() {
-        var rootEl = document.getElementById('root');
-        if (rootEl && rootEl.childNodes.length === 0) {
-          var script = document.createElement('script');
-          script.type = 'module';
-          script.crossOrigin = 'anonymous';
-          script.src = './assets/index.js';
-          document.body.appendChild(script);
+    <script>
+      // Normalizes subdirectory path for GitHub Pages without trailing slash so relative/base assets resolve properly
+      (function() {
+        var path = window.location.pathname;
+        if (path && !path.endsWith('/') && !path.split('/').pop().includes('.')) {
+          var target = window.location.protocol + '//' + window.location.host + path + '/' + window.location.search + window.location.hash;
+          window.location.replace(target);
         }
-      }, 350);
+      })();
     </script>
+  </head>
+  <body style="background-color: #0B0B0F; color: #f4f4f5; margin: 0; min-height: 100vh;" class="bg-[#0B0B0F] text-zinc-100 antialiased selection:bg-[#D4AF37] selection:text-black">
+    <div id="root">
+      <div style="min-height: 100vh; background-color: #0B0B0F; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: 'Space Grotesk', system-ui, sans-serif; color: #D4AF37; text-align: center; padding: 20px;">
+        <div style="width: 52px; height: 52px; border: 3px solid rgba(212,175,55,0.25); border-top-color: #D4AF37; border-radius: 50%; animation: cineverse-spin 0.8s linear infinite; margin-bottom: 20px;"></div>
+        <div style="font-size: 22px; font-weight: 800; letter-spacing: 3px; color: #ffffff;">CINE<span style="color: #D4AF37;">VERSE</span></div>
+        <div style="font-size: 11px; letter-spacing: 3px; color: #a1a1aa; margin-top: 8px; text-transform: uppercase;">Multiplex In-Seat Cinema Dining</div>
+      </div>
+      <style>
+        @keyframes cineverse-spin { to { transform: rotate(360deg); } }
+      </style>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
 
