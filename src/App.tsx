@@ -5,6 +5,7 @@ import { StaffDashboard } from './components/StaffDashboard';
 import { AdminPanel } from './components/AdminPanel';
 import { StaffLoginModal } from './components/StaffLoginModal';
 import { ReportIssueModal } from './components/ReportIssueModal';
+import { QRTestModal } from './components/QRTestModal';
 import { CineverseSplash } from './components/CineverseSplash';
 import { CartProvider } from './context/CartContext';
 import { storeService } from './services/store';
@@ -12,15 +13,26 @@ import { MenuItem, Order, UserProfile, ActiveTab, Ticket, IssueType } from './ty
 
 const SESSION_STORAGE_SEAT_KEY = 'seatserve_session_seat';
 
+// Helper to detect GitHub Pages repository base (e.g. /cineverse)
+const getRepoBase = (): string => {
+  if (typeof window === 'undefined') return '';
+  const segments = window.location.pathname.split('/').filter(Boolean);
+  if (segments.length > 0 && !['order', 'counter', 'staff', 'admin'].includes(segments[0])) {
+    return '/' + segments[0];
+  }
+  return '';
+};
+
 export default function App() {
-  // Handle GitHub Pages SPA 404 redirect (?p=...)
+  // Handle GitHub Pages SPA 404 redirect (?p=... or ?tab=...)
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
     const redirectedPath = params.get('p');
     if (redirectedPath) {
       const cleanPath = redirectedPath.startsWith('/') ? redirectedPath : '/' + redirectedPath;
-      const newUrl = window.location.origin + '/cineverse' + cleanPath;
+      const repoBase = getRepoBase();
+      const newUrl = window.location.origin + repoBase + cleanPath;
       window.history.replaceState({}, '', newUrl);
     }
   }, []);
@@ -29,16 +41,19 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     if (typeof window !== 'undefined') {
       const path = window.location.pathname.toLowerCase();
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab')?.toLowerCase();
+      const hash = window.location.hash.toLowerCase();
       const user = storeService.getCurrentUser();
 
       // Protect /admin: only admin can access
-      if (path.includes('admin')) {
+      if (path.includes('admin') || tabParam === 'admin' || hash.includes('admin')) {
         if (user && user.role === 'admin') return 'admin';
         return 'order';
       }
 
       // Protect /counter or /staff: only staff or admin can access
-      if (path.includes('counter') || path.includes('staff')) {
+      if (path.includes('counter') || path.includes('staff') || tabParam === 'counter' || hash.includes('counter')) {
         if (user && (user.role === 'staff' || user.role === 'admin')) return 'counter';
         return 'order';
       }
@@ -54,6 +69,9 @@ export default function App() {
   // Staff Login Modal state
   const [isStaffLoginModalOpen, setIsStaffLoginModalOpen] = useState(false);
 
+  // QR Test & Seat Simulator Modal state
+  const [isQRTestModalOpen, setIsQRTestModalOpen] = useState(false);
+
   // Issue Reporting Modal state
   const [isReportIssueModalOpen, setIsReportIssueModalOpen] = useState(false);
   const [reportIssueOrderId, setReportIssueOrderId] = useState<string | undefined>(undefined);
@@ -64,7 +82,6 @@ export default function App() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [tickets, setTickets] = useState<Ticket[]>(() => storeService.getTickets());
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(storeService.getCurrentUser());
-  const [isDemoMode] = useState<boolean>(storeService.isDemoMode());
   const [showSplash, setShowSplash] = useState<boolean>(true);
 
   // Enforce strict route protection on load & state updates
@@ -72,28 +89,34 @@ export default function App() {
     if (typeof window === 'undefined') return;
 
     const path = window.location.pathname.toLowerCase();
+    const params = new URLSearchParams(window.location.search);
+    const tabParam = params.get('tab')?.toLowerCase();
+    const repoBase = getRepoBase();
 
     // Check Counter access
-    if (activeTab === 'counter' || path.includes('counter') || path.includes('staff')) {
+    if (activeTab === 'counter' || path.includes('counter') || path.includes('staff') || tabParam === 'counter') {
       if (!currentUser || (currentUser.role !== 'staff' && currentUser.role !== 'admin')) {
         setActiveTab('order');
         const url = new URL(window.location.href);
-        url.pathname = '/order';
+        url.pathname = repoBase ? `${repoBase}/` : '/';
+        url.searchParams.delete('tab');
         window.history.replaceState({}, '', url.toString());
       }
     }
 
     // Check Admin access
-    if (activeTab === 'admin' || path.includes('admin')) {
+    if (activeTab === 'admin' || path.includes('admin') || tabParam === 'admin') {
       if (!currentUser) {
         setActiveTab('order');
         const url = new URL(window.location.href);
-        url.pathname = '/order';
+        url.pathname = repoBase ? `${repoBase}/` : '/';
+        url.searchParams.delete('tab');
         window.history.replaceState({}, '', url.toString());
       } else if (currentUser.role !== 'admin') {
         setActiveTab('counter');
         const url = new URL(window.location.href);
-        url.pathname = '/counter';
+        url.pathname = repoBase ? `${repoBase}/counter` : '/counter';
+        url.searchParams.set('tab', 'counter');
         window.history.replaceState({}, '', url.toString());
       }
     }
@@ -103,29 +126,36 @@ export default function App() {
   useEffect(() => {
     const handlePopState = () => {
       const path = window.location.pathname.toLowerCase();
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab')?.toLowerCase();
+      const hash = window.location.hash.toLowerCase();
       const user = storeService.getCurrentUser();
+      const repoBase = getRepoBase();
 
-      if (path.includes('counter') || path.includes('staff')) {
+      if (path.includes('counter') || path.includes('staff') || tabParam === 'counter' || hash.includes('counter')) {
         if (user && (user.role === 'staff' || user.role === 'admin')) {
           setActiveTab('counter');
         } else {
           setActiveTab('order');
           const url = new URL(window.location.href);
-          url.pathname = '/order';
+          url.pathname = repoBase ? `${repoBase}/` : '/';
+          url.searchParams.delete('tab');
           window.history.replaceState({}, '', url.toString());
         }
-      } else if (path.includes('admin')) {
+      } else if (path.includes('admin') || tabParam === 'admin' || hash.includes('admin')) {
         if (user && user.role === 'admin') {
           setActiveTab('admin');
         } else if (user && user.role === 'staff') {
           setActiveTab('counter');
           const url = new URL(window.location.href);
-          url.pathname = '/counter';
+          url.pathname = repoBase ? `${repoBase}/counter` : '/counter';
+          url.searchParams.set('tab', 'counter');
           window.history.replaceState({}, '', url.toString());
         } else {
           setActiveTab('order');
           const url = new URL(window.location.href);
-          url.pathname = '/order';
+          url.pathname = repoBase ? `${repoBase}/` : '/';
+          url.searchParams.delete('tab');
           window.history.replaceState({}, '', url.toString());
         }
       } else {
@@ -279,32 +309,38 @@ export default function App() {
     setActiveTab(tab);
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
+      const repoBase = getRepoBase();
       if (tab === 'order') {
-        url.pathname = '/order';
+        url.pathname = repoBase ? `${repoBase}/` : '/';
+        url.searchParams.delete('tab');
       } else {
-        url.pathname = `/${tab}`;
+        url.pathname = repoBase ? `${repoBase}/${tab}` : `/${tab}`;
+        url.searchParams.set('tab', tab);
       }
       window.history.pushState({}, '', url.toString());
     }
   };
 
-  // After successful staff login: redirect automatically based on role from Firebase
+  // After successful staff login: redirect automatically based on role
   const handleStaffLoginSuccess = (user: UserProfile) => {
     setCurrentUser(user);
     setIsStaffLoginModalOpen(false);
+    const repoBase = getRepoBase();
 
     if (user.role === 'admin') {
       setActiveTab('admin');
       if (typeof window !== 'undefined') {
         const url = new URL(window.location.href);
-        url.pathname = '/admin';
+        url.pathname = repoBase ? `${repoBase}/admin` : '/admin';
+        url.searchParams.set('tab', 'admin');
         window.history.pushState({}, '', url.toString());
       }
     } else {
       setActiveTab('counter');
       if (typeof window !== 'undefined') {
         const url = new URL(window.location.href);
-        url.pathname = '/counter';
+        url.pathname = repoBase ? `${repoBase}/counter` : '/counter';
+        url.searchParams.set('tab', 'counter');
         window.history.pushState({}, '', url.toString());
       }
     }
@@ -330,6 +366,7 @@ export default function App() {
           currentUser={currentUser}
           onOpenStaffLogin={() => setIsStaffLoginModalOpen(true)}
           onOpenReportIssue={() => handleOpenReportIssue()}
+          onOpenQRTest={() => setIsQRTestModalOpen(true)}
           activeOrderCount={activeOrdersCount}
           openTicketsCount={openTicketsCount}
         />
@@ -345,6 +382,7 @@ export default function App() {
               menuItems={menuItems}
               orders={orders}
               onOpenReportIssue={handleOpenReportIssue}
+              onOpenQRTest={() => setIsQRTestModalOpen(true)}
             />
           )}
 
@@ -353,7 +391,6 @@ export default function App() {
             <StaffDashboard
               orders={orders}
               currentUser={currentUser}
-              isDemoMode={isDemoMode}
               menuItems={menuItems}
             />
           )}
@@ -374,17 +411,15 @@ export default function App() {
                 updateUrlParams(sc, r, s);
                 handleTabChange('order');
               }}
-              isDemoMode={isDemoMode}
             />
           )}
         </main>
 
-        {/* Staff Login Modal (single discreet corner icon button opens this) */}
+        {/* Staff Login Modal */}
         <StaffLoginModal
           isOpen={isStaffLoginModalOpen}
           onClose={() => setIsStaffLoginModalOpen(false)}
           onLoginSuccess={handleStaffLoginSuccess}
-          isDemoMode={isDemoMode}
         />
 
         {/* Customer Issue Ticket Modal */}
@@ -396,6 +431,27 @@ export default function App() {
           seat={seat}
           defaultOrderId={reportIssueOrderId}
           initialIssueType={reportIssueInitialType}
+        />
+
+        {/* QR Code Scanner & Seat Tracking Tester Modal */}
+        <QRTestModal
+          isOpen={isQRTestModalOpen}
+          onClose={() => setIsQRTestModalOpen(false)}
+          currentScreen={screen}
+          currentRow={row}
+          currentSeat={seat}
+          menuItems={menuItems}
+          onSelectSeat={(sc, r, s) => {
+            setScreen(sc);
+            setRow(r);
+            setSeat(s);
+            sessionStorage.setItem(
+              SESSION_STORAGE_SEAT_KEY,
+              JSON.stringify({ screen: sc, row: r, seat: s })
+            );
+            updateUrlParams(sc, r, s);
+            handleTabChange('order');
+          }}
         />
       </div>
     </CartProvider>

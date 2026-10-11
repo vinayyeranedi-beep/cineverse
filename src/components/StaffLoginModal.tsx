@@ -63,9 +63,9 @@ export const StaffLoginModal: React.FC<StaffLoginModalProps> = ({
     }
   };
 
-  const handleFillDemo = (demoEmail: string) => {
-    setEmail(demoEmail);
-    setPassword('staff123');
+  const handleQuickFill = (testEmail: string) => {
+    setEmail(testEmail);
+    setPassword(testEmail.includes('admin') ? 'admin123' : 'staff123');
     setErrorMessage('');
   };
 
@@ -178,33 +178,31 @@ export const StaffLoginModal: React.FC<StaffLoginModalProps> = ({
           </div>
         </form>
 
-        {/* Quick Demo Credentials Helper */}
-        {isDemoMode && (
-          <div className="mt-5 pt-4 border-t border-zinc-800/80">
-            <span className="text-[10px] text-[#A1A1AA] uppercase tracking-wider block mb-2 font-semibold">
-              Demo Quick-Fill:
-            </span>
-            <div className="grid grid-cols-2 gap-2 text-[11px]">
-              <button
-                type="button"
-                onClick={() => handleFillDemo('staff@seatserve.cinema')}
-                className="px-2.5 py-1.5 rounded-lg bg-[#0B0B0F] hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white transition-colors text-left"
-              >
-                <span className="block font-bold text-[#D4AF37]">Counter Staff</span>
-                <span className="text-[9px] text-[#A1A1AA] block truncate">staff@seatserve.cinema</span>
-              </button>
+        {/* Cinema Accounts Helper */}
+        <div className="mt-5 pt-4 border-t border-zinc-800/80">
+          <span className="text-[10px] text-[#A1A1AA] uppercase tracking-wider block mb-2 font-semibold">
+            Cinema Test Accounts:
+          </span>
+          <div className="grid grid-cols-2 gap-2 text-[11px]">
+            <button
+              type="button"
+              onClick={() => handleQuickFill('staff@cineverse.com')}
+              className="px-2.5 py-1.5 rounded-lg bg-[#0B0B0F] hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white transition-colors text-left"
+            >
+              <span className="block font-bold text-[#D4AF37]">Counter Staff</span>
+              <span className="text-[9px] text-[#A1A1AA] block truncate">staff@cineverse.com</span>
+            </button>
 
-              <button
-                type="button"
-                onClick={() => handleFillDemo('admin@seatserve.cinema')}
-                className="px-2.5 py-1.5 rounded-lg bg-[#0B0B0F] hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white transition-colors text-left"
-              >
-                <span className="block font-bold text-rose-400">Admin</span>
-                <span className="text-[9px] text-[#A1A1AA] block truncate">admin@seatserve.cinema</span>
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => handleQuickFill('admin@cineverse.com')}
+              className="px-2.5 py-1.5 rounded-lg bg-[#0B0B0F] hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white transition-colors text-left"
+            >
+              <span className="block font-bold text-rose-400">Admin</span>
+              <span className="text-[9px] text-[#A1A1AA] block truncate">admin@cineverse.com</span>
+            </button>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

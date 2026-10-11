@@ -43,7 +43,7 @@ import { TicketsManagementView } from './TicketsManagementView';
 interface StaffDashboardProps {
   orders: Order[];
   currentUser: UserProfile | null;
-  isDemoMode: boolean;
+  isDemoMode?: boolean;
   menuItems?: MenuItem[];
 }
 
@@ -144,10 +144,10 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
     }
   };
 
-  const handleQuickDemoLogin = async () => {
+  const handleQuickStaffLogin = async () => {
     setIsLoggingIn(true);
     try {
-      await storeService.login('staff@seatserve.cinema', 'demo123');
+      await storeService.login('staff@cineverse.com', 'staff123');
     } catch (e) {
       console.error(e);
     } finally {
@@ -333,17 +333,15 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
             </button>
           </form>
 
-          {isDemoMode && (
-            <div className="pt-4 border-t border-zinc-800 text-center">
-              <button
-                onClick={handleQuickDemoLogin}
-                className="w-full py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-bold text-[#D4AF37] border border-zinc-700 transition-colors flex items-center justify-center gap-1.5"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Quick Demo Staff Sign In</span>
-              </button>
-            </div>
-          )}
+          <div className="pt-4 border-t border-zinc-800 text-center">
+            <button
+              onClick={handleQuickStaffLogin}
+              className="w-full py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-bold text-[#D4AF37] border border-zinc-700 transition-colors flex items-center justify-center gap-1.5"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Sign In with Counter Staff (staff@cineverse.com)</span>
+            </button>
+          </div>
         </div>
       </div>
     );

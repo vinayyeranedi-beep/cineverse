@@ -18,6 +18,7 @@ import {
   Trash2,
   Loader2,
   AlertTriangle,
+  QrCode,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { MenuItem, Order, OrderItem, Category, IssueType } from '../types';
@@ -32,6 +33,7 @@ interface CustomerOrderViewProps {
   menuItems: MenuItem[];
   orders: Order[];
   onOpenReportIssue?: (orderId?: string, initialIssue?: IssueType) => void;
+  onOpenQRTest?: () => void;
 }
 
 const CATEGORIES: { label: string; value: Category | 'All' }[] = [
@@ -49,6 +51,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
   menuItems,
   orders,
   onOpenReportIssue,
+  onOpenQRTest,
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<Category | 'All'>('All');
   const [searchQuery, setSearchQuery] = useState('');
@@ -266,6 +269,16 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
             <span className="text-xs sm:text-sm font-display font-bold tracking-wide">
               Screen {screen} - Seat {cleanSeatLabel}
             </span>
+            {onOpenQRTest && (
+              <button
+                onClick={onOpenQRTest}
+                title="Test Armrest QR Scanner & Seat Simulator"
+                className="ml-1 sm:ml-2 px-2 py-0.5 rounded-lg bg-zinc-800/90 hover:bg-zinc-700 text-[#D4AF37] hover:text-white border border-[#D4AF37]/30 text-[10px] font-bold flex items-center gap-1 transition-all active:scale-95"
+              >
+                <QrCode className="w-3 h-3" />
+                <span>Test QR</span>
+              </button>
+            )}
           </div>
 
           {onOpenReportIssue && (

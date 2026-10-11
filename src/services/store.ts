@@ -125,120 +125,32 @@ const INITIAL_SCREENS: Record<string, ScreenGridConfig> = {
 const INITIAL_STAFF: StaffAccount[] = [
   {
     id: 'staff-1',
-    email: 'staff@seatserve.cinema',
-    name: 'Rohan Sharma (Counter Staff)',
+    email: 'staff@cineverse.com',
+    name: 'Counter Staff',
     role: 'staff',
     createdAt: Date.now() - 86400000 * 10,
   },
   {
     id: 'staff-2',
-    email: 'counter2@seatserve.cinema',
-    name: 'Priya Patel (Delivery Runner)',
+    email: 'runner@cineverse.com',
+    name: 'Delivery Runner',
     role: 'staff',
     createdAt: Date.now() - 86400000 * 5,
   },
   {
     id: 'admin-1',
-    email: 'admin@seatserve.cinema',
-    name: 'Amit Verma (Cinema GM)',
+    email: 'admin@cineverse.com',
+    name: 'Cinema Admin',
     role: 'admin',
     createdAt: Date.now() - 86400000 * 30,
   },
 ];
 
-// Pre-seeded initial orders for demo
-const INITIAL_ORDERS: Order[] = [
-  {
-    id: 'ord-seed-1',
-    orderId: 'SS-9041',
-    screen: '1',
-    row: 'B',
-    seat: '7',
-    items: [
-      { id: 'pop-1', name: 'Classic Salted Butter Popcorn (Jumbo)', qty: 1, price: 240, isVeg: true },
-      { id: 'drk-1', name: 'Ice Chilled Coca-Cola (750ml)', qty: 2, price: 180, isVeg: true },
-    ],
-    total: 600,
-    notes: 'Please bring extra napkins & paper cups',
-    status: 'received',
-    createdAt: Date.now() - 1000 * 60 * 3, // 3 mins ago
-  },
-  {
-    id: 'ord-seed-2',
-    orderId: 'SS-8722',
-    screen: '1',
-    row: 'F',
-    seat: '12',
-    items: [
-      { id: 'cmb-1', name: 'Solo Blockbuster Combo', qty: 2, price: 380, isVeg: true },
-      { id: 'snk-1', name: 'Cheesy Jalapeño Tortilla Nachos', qty: 1, price: 250, isVeg: true },
-    ],
-    total: 1010,
-    notes: 'No jalapeños on nachos please',
-    status: 'preparing',
-    createdAt: Date.now() - 1000 * 60 * 9, // 9 mins ago
-  },
-  {
-    id: 'ord-seed-3',
-    orderId: 'SS-7619',
-    screen: '1',
-    row: 'H',
-    seat: '10',
-    items: [
-      { id: 'cmb-2', name: 'Duo Feast Sharing Combo', qty: 1, price: 690, isVeg: true },
-    ],
-    total: 690,
-    notes: 'Hot caramel popcorn',
-    status: 'on_the_way',
-    createdAt: Date.now() - 1000 * 60 * 16, // 16 mins ago
-  },
-  {
-    id: 'ord-seed-4',
-    orderId: 'SS-6540',
-    screen: '2',
-    row: 'D',
-    seat: '5',
-    items: [
-      { id: 'snk-2', name: 'Crispy Cinema Samosa (2 Pieces)', qty: 2, price: 160, isVeg: true },
-      { id: 'drk-2', name: 'Sprite Lemon-Lime Refresh (750ml)', qty: 2, price: 180, isVeg: true },
-    ],
-    total: 680,
-    notes: 'Delivered before interval',
-    status: 'delivered',
-    createdAt: Date.now() - 1000 * 60 * 35, // 35 mins ago
-  },
-];
+// Clean initial orders for real testing (no dummy pre-seeded orders)
+const INITIAL_ORDERS: Order[] = [];
 
-// Pre-seeded initial tickets for demo
-const INITIAL_TICKETS: Ticket[] = [
-  {
-    id: 'tkt-seed-1',
-    ticketId: 'TKT-8291',
-    screen: '1',
-    row: 'B',
-    seat: '7',
-    issueType: 'Order delayed',
-    description: 'Popcorn ordered 15 mins ago, movie starting soon.',
-    orderId: 'SS-7619',
-    contact: '+91 98765 43210',
-    status: 'open',
-    createdAt: Date.now() - 1000 * 60 * 3, // 3 mins ago
-  },
-  {
-    id: 'tkt-seed-2',
-    ticketId: 'TKT-5412',
-    screen: '2',
-    row: 'D',
-    seat: '5',
-    issueType: 'Wrong or missing item',
-    description: 'Received salt popcorn instead of caramel popcorn tub.',
-    orderId: 'SS-6540',
-    status: 'in_progress',
-    staffReply: 'Runner dispatched with fresh caramel popcorn tub to seat D5.',
-    createdAt: Date.now() - 1000 * 60 * 12, // 12 mins ago
-    updatedAt: Date.now() - 1000 * 60 * 5,
-  },
-];
+// Clean initial tickets for real testing (no dummy pre-seeded tickets)
+const INITIAL_TICKETS: Ticket[] = [];
 
 export interface FirebaseConfigType {
   apiKey: string;
@@ -297,10 +209,20 @@ class StoreService {
       // Orders
       const savedOrders = localStorage.getItem(STORAGE_KEY_ORDERS);
       if (savedOrders) {
-        this.orders = JSON.parse(savedOrders);
+        try {
+          const parsed = JSON.parse(savedOrders);
+          // Filter out legacy dummy seeds so real testing is clean
+          this.orders = Array.isArray(parsed)
+            ? parsed.filter((o: Order) => !o.id.startsWith('ord-seed-'))
+            : [];
+          localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify(this.orders));
+        } catch {
+          this.orders = [];
+          localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify([]));
+        }
       } else {
-        this.orders = [...INITIAL_ORDERS];
-        localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify(this.orders));
+        this.orders = [];
+        localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify([]));
       }
 
       // Screens
@@ -324,10 +246,20 @@ class StoreService {
       // Tickets
       const savedTickets = localStorage.getItem(STORAGE_KEY_TICKETS);
       if (savedTickets) {
-        this.tickets = JSON.parse(savedTickets);
+        try {
+          const parsed = JSON.parse(savedTickets);
+          // Filter out legacy dummy seeds
+          this.tickets = Array.isArray(parsed)
+            ? parsed.filter((t: Ticket) => !t.id.startsWith('tkt-seed-'))
+            : [];
+          localStorage.setItem(STORAGE_KEY_TICKETS, JSON.stringify(this.tickets));
+        } catch {
+          this.tickets = [];
+          localStorage.setItem(STORAGE_KEY_TICKETS, JSON.stringify([]));
+        }
       } else {
-        this.tickets = [...INITIAL_TICKETS];
-        localStorage.setItem(STORAGE_KEY_TICKETS, JSON.stringify(this.tickets));
+        this.tickets = [];
+        localStorage.setItem(STORAGE_KEY_TICKETS, JSON.stringify([]));
       }
 
       // Current user
@@ -1210,17 +1142,51 @@ class StoreService {
     };
   }
 
+  public async clearAllOrders(): Promise<void> {
+    this.orders = [];
+    localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify([]));
+    this.notifyOrderListeners();
+    if (this.broadcastChannel) {
+      try {
+        this.broadcastChannel.postMessage({ type: 'ORDER_UPDATE' });
+      } catch (e) {
+        // ignore
+      }
+    }
+  }
+
+  public async clearAllTickets(): Promise<void> {
+    this.tickets = [];
+    localStorage.setItem(STORAGE_KEY_TICKETS, JSON.stringify([]));
+    this.notifyTicketListeners();
+    if (this.broadcastChannel) {
+      try {
+        this.broadcastChannel.postMessage({ type: 'TICKET_UPDATE' });
+      } catch (e) {
+        // ignore
+      }
+    }
+  }
+
   // --- Auth ---
   public async login(email: string, pass: string): Promise<UserProfile> {
     const cleanEmail = email.trim().toLowerCase();
 
     if (this.isDemo || !this.auth) {
       const existingStaff = this.staffAccounts.find((s) => s.email.toLowerCase() === cleanEmail);
-      const role = cleanEmail.includes('admin') || existingStaff?.role === 'admin' ? 'admin' : 'staff';
-      const name = existingStaff?.name || (role === 'admin' ? 'Cinema Admin' : 'Counter Staff');
+      const isAdmin =
+        cleanEmail.includes('admin') ||
+        cleanEmail === 'admin@cineverse.com' ||
+        cleanEmail === 'admin@seatserve.cinema' ||
+        cleanEmail === 'admin@seatbite.cinema' ||
+        existingStaff?.role === 'admin';
+      const role = isAdmin ? 'admin' : 'staff';
+      const name =
+        existingStaff?.name ||
+        (role === 'admin' ? 'Cinema Administrator' : 'Counter Staff');
 
       const user: UserProfile = {
-        uid: 'demo-' + Date.now(),
+        uid: 'usr-' + Date.now(),
         email: cleanEmail,
         role,
         name,

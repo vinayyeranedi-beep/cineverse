@@ -31,6 +31,7 @@ import {
   Eye,
   Utensils,
   Shield,
+  Smartphone,
 } from 'lucide-react';
 import {
   MenuItem,
@@ -47,7 +48,7 @@ interface AdminPanelProps {
   menuItems: MenuItem[];
   currentUser: UserProfile | null;
   onSelectCustomerSeat: (screen: string, row: string, seat: string) => void;
-  isDemoMode: boolean;
+  isDemoMode?: boolean;
 }
 
 interface SeatQRItem {
@@ -121,15 +122,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   // QR Generator Inputs
   const [websiteAddress, setWebsiteAddress] = useState(() => {
     if (typeof window !== 'undefined') {
-      return window.location.origin;
+      const segments = window.location.pathname.split('/').filter(Boolean);
+      const repoBase =
+        segments.length > 0 && !['order', 'counter', 'staff', 'admin'].includes(segments[0].toLowerCase())
+          ? '/' + segments[0]
+          : '';
+      return `${window.location.origin}${repoBase}`;
     }
-    return 'https://seatbite-cinema.web.app';
+    return 'https://vinayyeranedi-beep.github.io/cineverse';
   });
   const [qrRowSearch, setQrRowSearch] = useState('');
   const [rowQRGroups, setRowQRGroups] = useState<RowQRGroup[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isZipping, setIsZipping] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
+  const [previewQRItem, setPreviewQRItem] = useState<SeatQRItem | null>(null);
 
   // Staff state
   const [staffList, setStaffList] = useState<StaffAccount[]>([]);
@@ -283,8 +290,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           // Exclude disabled/non-existent seats
           if (disabledSeats.includes(seatLabel)) continue;
 
-          // Required QR format: /order?screen=1&row=B&seat=7
-          const url = `${cleanBase}/order?screen=${selectedScreenId}&row=${rowLetter}&seat=${s}`;
+          // Format QR: ?screen=1&row=B&seat=7 (loads directly with no 404 redirect)
+          const url = `${cleanBase}/?screen=${selectedScreenId}&row=${rowLetter}&seat=${s}`;
           const dataUrl = await QRCode.toDataURL(url, {
             width: 220,
             margin: 1,
@@ -446,13 +453,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           </div>
           <h2 className="text-2xl font-display font-black text-white">Admin Access Required</h2>
           <p className="text-xs text-[#A1A1AA] leading-relaxed">
-            Please sign in with cinema administrator credentials or enable Demo Mode in the top navigation to access screen setup and QR management.
+            Please sign in with cinema administrator credentials to access screen setup, menu catalog, and QR management.
           </p>
           <button
-            onClick={() => storeService.login('admin@seatbite.cinema', 'demo123')}
-            className="w-full py-3 rounded-xl bg-[#E50914] hover:bg-[#b80710] font-bold text-sm text-white shadow-lg shadow-[#E50914]/25 transition-all"
+            onClick={() => storeService.login('admin@cineverse.com', 'admin123')}
+            className="w-full py-3.5 rounded-xl bg-[#E50914] hover:bg-[#b80710] font-bold text-sm text-white shadow-lg shadow-[#E50914]/25 transition-all"
           >
-            Quick Demo Admin Sign In
+            Sign in as Cinema Admin (admin@cineverse.com)
           </button>
         </div>
       </div>
@@ -508,14 +515,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <Sparkles className="w-3.5 h-3.5" />
                 Cinema Administration
               </span>
-              {isDemoMode && (
-                <span className="text-[10px] text-[#A1A1AA] uppercase font-bold px-2 py-0.5 rounded bg-zinc-800 border border-zinc-700">
-                  Demo Mode
-                </span>
-              )}
             </div>
             <h1 className="text-2xl sm:text-3xl font-display font-black tracking-tight text-white mt-1">
-              SeatServe Admin Control
+              Cineverse Multiplex Admin
             </h1>
             <p className="text-xs text-[#A1A1AA] mt-0.5">
               Manage cinema screens, m x n seat grids, menu inventory, QR sticker exports, and staff access.
@@ -992,27 +994,52 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       {group.seats.map((item) => (
                         <div
                           key={item.seatLabel}
-                          onClick={() => handleDownloadSingleQR(item)}
-                          title="Click to download PNG sticker"
-                          className="print-card bg-[#0B0B0F] border border-zinc-800 hover:border-[#D4AF37] p-2.5 rounded-2xl flex flex-col items-center cursor-pointer transition-all hover:scale-105 group"
+                          className="print-card bg-[#0B0B0F] border border-zinc-800 hover:border-[#D4AF37] p-2.5 rounded-2xl flex flex-col items-center transition-all hover:scale-[1.02] group"
                         >
                           {/* QR Image */}
-                          <div className="bg-white p-1 rounded-xl shadow-inner mb-2 w-full aspect-square flex items-center justify-center">
+                          <div
+                            onClick={() => setPreviewQRItem(item)}
+                            title="Click to zoom & test with mobile camera"
+                            className="bg-white p-1 rounded-xl shadow-inner mb-2 w-full aspect-square flex items-center justify-center cursor-pointer relative group-hover:ring-2 group-hover:ring-[#D4AF37]/50"
+                          >
                             <img
                               src={item.dataUrl}
                               alt={item.seatLabel}
                               className="w-full h-full object-contain"
                             />
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 rounded-xl flex items-center justify-center transition-opacity text-white text-[10px] font-bold gap-1">
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>Zoom</span>
+                            </div>
                           </div>
 
                           {/* Seat Label */}
-                          <div className="text-center w-full">
+                          <div className="text-center w-full mb-2">
                             <span className="font-display font-black text-xs text-white group-hover:text-[#D4AF37] block">
                               Screen {item.screen} • {item.seatLabel}
                             </span>
                             <span className="text-[9px] text-[#A1A1AA] block truncate font-mono">
                               SeatServe QR
                             </span>
+                          </div>
+
+                          {/* Quick Actions */}
+                          <div className="flex items-center gap-1 w-full pt-1 border-t border-zinc-800/80">
+                            <button
+                              onClick={() => onSelectCustomerSeat(String(item.screen), item.row, String(item.seat))}
+                              title="Test Scan & open customer ordering for this seat"
+                              className="flex-1 py-1 px-1.5 rounded-lg bg-zinc-800 hover:bg-[#D4AF37] hover:text-black text-zinc-300 text-[10px] font-bold flex items-center justify-center gap-1 transition-colors"
+                            >
+                              <Smartphone className="w-3 h-3" />
+                              <span>Test</span>
+                            </button>
+                            <button
+                              onClick={() => handleDownloadSingleQR(item)}
+                              title="Download PNG sticker"
+                              className="p-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition-colors"
+                            >
+                              <Download className="w-3 h-3" />
+                            </button>
                           </div>
                         </div>
                       ))}
@@ -1291,6 +1318,41 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 ))}
               </div>
             </div>
+
+            {/* Testing & Reset Controls */}
+            <div className="bg-[#15151C] border border-zinc-800 rounded-3xl p-5 sm:p-6 shadow-xl">
+              <h3 className="text-base font-bold text-white mb-1.5 flex items-center gap-2">
+                <Trash2 className="w-4 h-4 text-rose-400" />
+                Live Testing & Data Controls
+              </h3>
+              <p className="text-xs text-[#A1A1AA] mb-4">
+                Reset live testing orders and tickets to perform clean order flow validation.
+              </p>
+
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await storeService.clearAllOrders();
+                  }}
+                  className="px-4 py-2.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 hover:bg-rose-500/25 hover:text-white font-bold text-xs flex items-center gap-2 transition-all min-h-[40px]"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Clear All Test Orders</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await storeService.clearAllTickets();
+                  }}
+                  className="px-4 py-2.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-white font-bold text-xs flex items-center gap-2 transition-all min-h-[40px]"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Reset Issue Tickets</span>
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -1424,6 +1486,76 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Zoomed QR Preview Modal for Mobile Camera Scanning */}
+      {previewQRItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-sm bg-[#15151C] border border-[#D4AF37]/50 rounded-3xl shadow-2xl p-6 text-white text-center space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
+              <div className="text-left">
+                <h3 className="text-base font-bold text-white">
+                  Screen {previewQRItem.screen} • Seat {previewQRItem.seatLabel}
+                </h3>
+                <span className="text-[11px] text-[#D4AF37] font-semibold">Seat Armrest QR Code</span>
+              </div>
+              <button
+                onClick={() => setPreviewQRItem(null)}
+                className="w-8 h-8 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white flex items-center justify-center"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="bg-white p-3 rounded-2xl shadow-xl w-60 h-60 mx-auto flex items-center justify-center">
+              <img
+                src={previewQRItem.dataUrl}
+                alt={previewQRItem.seatLabel}
+                className="w-full h-full object-contain"
+              />
+            </div>
+
+            <p className="text-xs text-zinc-400 leading-relaxed">
+              Aim your smartphone camera at this QR code to test mobile scanning and automatic seat capture.
+            </p>
+
+            <div className="bg-[#0B0B0F] p-2.5 rounded-xl border border-zinc-800 text-[11px] font-mono text-[#D4AF37] truncate">
+              {previewQRItem.url}
+            </div>
+
+            <div className="flex flex-col gap-2 pt-2">
+              <button
+                onClick={() => {
+                  onSelectCustomerSeat(String(previewQRItem.screen), previewQRItem.row, String(previewQRItem.seat));
+                  setPreviewQRItem(null);
+                }}
+                className="w-full py-2.5 rounded-xl bg-gradient-to-r from-[#D4AF37] to-[#AA7C11] text-black font-display font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-[#D4AF37]/20"
+              >
+                <Smartphone className="w-4 h-4" />
+                <span>Simulate Scan on This Device</span>
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(previewQRItem.url);
+                    alert('Copied QR link to clipboard!');
+                  }}
+                  className="flex-1 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 flex items-center justify-center gap-1.5"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copy Link</span>
+                </button>
+                <button
+                  onClick={() => handleDownloadSingleQR(previewQRItem)}
+                  className="flex-1 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 flex items-center justify-center gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download PNG</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

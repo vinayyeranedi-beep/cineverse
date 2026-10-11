@@ -11,6 +11,7 @@ import {
   Volume2,
   VolumeX,
   AlertTriangle,
+  QrCode,
 } from 'lucide-react';
 import { ActiveTab, UserProfile } from '../types';
 import { soundService } from '../services/sound';
@@ -24,6 +25,7 @@ interface NavbarProps {
   currentUser: UserProfile | null;
   onOpenStaffLogin: () => void;
   onOpenReportIssue?: () => void;
+  onOpenQRTest?: () => void;
   activeOrderCount?: number;
   openTicketsCount?: number;
 }
@@ -34,6 +36,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentUser,
   onOpenStaffLogin,
   onOpenReportIssue,
+  onOpenQRTest,
   activeOrderCount = 0,
   openTicketsCount = 0,
 }) => {
@@ -97,6 +100,19 @@ export const Navbar: React.FC<NavbarProps> = ({
                 >
                   <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
                   <span className="hidden sm:inline">Report Issue</span>
+                </button>
+              )}
+
+              {/* QR Tester Button */}
+              {onOpenQRTest && (
+                <button
+                  onClick={onOpenQRTest}
+                  aria-label="Test QR Code & Seat Tracking"
+                  title="Test Armrest QR Scanner & Seat Simulator"
+                  className="h-10 px-2.5 sm:px-3 rounded-xl bg-[#15151C] border border-[#D4AF37]/40 text-[#D4AF37] hover:bg-[#D4AF37]/10 hover:shadow-[0_0_12px_rgba(212,175,55,0.2)] flex items-center gap-1.5 transition-all text-xs font-semibold min-h-[40px] active:scale-95"
+                >
+                  <QrCode className="w-4 h-4" />
+                  <span className="hidden sm:inline">Test QR</span>
                 </button>
               )}
 
@@ -181,6 +197,19 @@ export const Navbar: React.FC<NavbarProps> = ({
             /* STAFF / ADMIN PAGES: Top controls for back to menu & sign out */
             /* ========================================================= */
             <div className="flex items-center gap-2">
+              {/* QR Tester Button */}
+              {onOpenQRTest && (
+                <button
+                  onClick={onOpenQRTest}
+                  aria-label="Test QR Code"
+                  title="Test Armrest QR Scanner & Seat Simulator"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#15151C] hover:bg-zinc-800 border border-[#D4AF37]/30 text-xs font-semibold text-[#D4AF37] hover:text-white transition-colors min-h-[40px]"
+                >
+                  <QrCode className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Test QR</span>
+                </button>
+              )}
+
               {/* Back to Customer Menu */}
               <button
                 onClick={() => setActiveTab('order')}
