@@ -12,10 +12,25 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" crossorigin href="./assets/index.css">
   </head>
   <body class="bg-zinc-950 text-zinc-100 antialiased selection:bg-amber-500 selection:text-zinc-950">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script type="module">
+      // Resilient fallback for static GitHub Pages deployments:
+      // If uncompiled /src/main.tsx cannot be loaded by static hosting, automatically load pre-bundled assets
+      setTimeout(function() {
+        var rootEl = document.getElementById('root');
+        if (rootEl && rootEl.childNodes.length === 0) {
+          var script = document.createElement('script');
+          script.type = 'module';
+          script.crossOrigin = 'anonymous';
+          script.src = './assets/index.js';
+          document.body.appendChild(script);
+        }
+      }, 350);
+    </script>
   </body>
 </html>
 
