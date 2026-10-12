@@ -352,7 +352,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
         <div className="max-w-4xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <div className="mb-1.5">
-              <CineverseLogo size="xs" showSubtitle={true} subtitle="IN-SEAT AUDITORIUM DINING" />
+              <CineverseLogo size="xs" showSubtitle={true} subtitle="IN-SEAT FOOD CONCESSION" />
             </div>
             <h1 className="text-xl sm:text-2xl font-display font-black tracking-tight text-white flex items-center gap-2">
               Delivering to <span className="text-[#D4AF37]">Screen {screen} - Seat {cleanSeatLabel}</span>

@@ -41,7 +41,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onDismiss }) => {
           layout="vertical"
           size="xl"
           showSubtitle={true}
-          subtitle="MULTIPLEX CINEMA DINING"
+          subtitle="MULTIPLEX FOOD CONCESSION"
           className="mb-4 drop-shadow-[0_0_30px_rgba(212,175,55,0.35)]"
         />
 
@@ -59,7 +59,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onDismiss }) => {
       </div>
 
       <div className="absolute bottom-6 text-[11px] text-[#A1A1AA]/60">
-        Cineverse Multiplex • Premium In-Seat QR Dining
+        Cineverse Multiplex • Premium In-Seat Food Concession
       </div>
     </div>
   );

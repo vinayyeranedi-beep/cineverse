@@ -42,7 +42,7 @@ export const CineverseSplash: React.FC<CineverseSplashProps> = ({ onComplete }) 
               layout="vertical"
               size="xl"
               showSubtitle={true}
-              subtitle="MULTIPLEX CINEMA DINING"
+              subtitle="MULTIPLEX FOOD CONCESSION"
               className="drop-shadow-[0_0_35px_rgba(212,175,55,0.4)]"
             />
 

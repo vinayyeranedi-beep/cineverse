@@ -3,21 +3,24 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
 
-export default defineConfig(() => {
-  // Determine base path:
+export default defineConfig(({ command }) => {
+  // In dev mode (command === 'serve'), always use '/' so Vite serves root HTML and assets properly.
+  // In build mode for deployment:
   // 1. If BASE_PATH is supplied by GitHub Actions configure-pages, use it.
   // 2. If GITHUB_REPOSITORY (e.g. "username/cineverse") is present, use "/<repo>/".
   // 3. Otherwise default to relative "./" for portable local and preview hosting.
-  let base = './';
-  if (process.env.BASE_PATH) {
-    const bp = process.env.BASE_PATH.trim();
-    base = bp.endsWith('/') ? bp : `${bp}/`;
-  } else if (process.env.GITHUB_REPOSITORY) {
-    const repo = process.env.GITHUB_REPOSITORY.split('/')[1];
-    if (repo && !repo.endsWith('.github.io')) {
-      base = `/${repo}/`;
-    } else {
-      base = '/';
+  let base = command === 'serve' ? '/' : './';
+  if (command !== 'serve') {
+    if (process.env.BASE_PATH) {
+      const bp = process.env.BASE_PATH.trim();
+      base = bp.endsWith('/') ? bp : `${bp}/`;
+    } else if (process.env.GITHUB_REPOSITORY) {
+      const repo = process.env.GITHUB_REPOSITORY.split('/')[1];
+      if (repo && !repo.endsWith('.github.io')) {
+        base = `/${repo}/`;
+      } else {
+        base = '/';
+      }
     }
   }
 
@@ -30,6 +33,8 @@ export default defineConfig(() => {
       },
     },
     server: {
+      port: 3000,
+      host: '0.0.0.0',
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify—file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
