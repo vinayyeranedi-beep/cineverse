@@ -22,22 +22,35 @@ export interface OrderItem {
   isVeg?: boolean;
 }
 
-export type OrderStatus = 'received' | 'preparing' | 'on_the_way' | 'delivered';
+export type OrderStatus =
+  | 'received'
+  | 'preparing'
+  | 'ready'
+  | 'on_the_way'
+  | 'delivered'
+  | 'cancelled'
+  | 'awaiting_payment'
+  | 'Awaiting payment'
+  | string;
 
 export interface Order {
   id: string;
   orderId?: string;
   screen: string;
   row: string;
+  col?: string | number;
   seat: string;
   items: OrderItem[];
   total: number;
   notes?: string;
   note?: string; // fallback
   status: OrderStatus;
+  paymentMethod?: 'pay_at_seat' | 'cash' | 'upi' | 'card' | 'online' | string;
+  paymentStatus?: 'paid' | 'pending' | 'unpaid' | 'awaiting_payment' | string;
+  paidAt?: number;
   createdAt: number;
   updatedAt?: number;
-  round?: number; // e.g. Round 1, Round 2 (allows ordering up to multiple times)
+  round?: number;
   isDemo?: boolean;
 }
 

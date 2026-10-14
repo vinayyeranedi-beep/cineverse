@@ -11,6 +11,7 @@ import {
   query,
   orderBy,
   getDocs,
+  where,
 } from 'firebase/firestore';
 import {
   getAuth,
@@ -34,6 +35,15 @@ import {
   CinemaBranding,
 } from '../types';
 import { INITIAL_MENU_ITEMS } from '../data/sampleMenu';
+import {
+  startOfDay,
+  endOfDay,
+  isToday,
+  formatTime,
+  formatDay,
+  getHour,
+  DateInput,
+} from '../lib/dates';
 
 const STORAGE_KEY_MENU = 'seatserve_menu_items_v2';
 const STORAGE_KEY_ORDERS = 'seatserve_orders_v2';
@@ -593,23 +603,7 @@ class StoreService {
         (snapshot) => {
           const list: Order[] = [];
           snapshot.forEach((d) => {
-            const data = d.data();
-            list.push({
-              id: d.id,
-              orderId: data.orderId || ('SS-' + d.id.substring(0, 4).toUpperCase()),
-              screen: String(data.screen || '1'),
-              row: String(data.row || 'A').toUpperCase(),
-              seat: String(data.seat || '1'),
-              items: data.items || [],
-              total: Number(data.total) || 0,
-              notes: data.notes || data.note || '',
-              note: data.note || data.notes || '',
-              status: (data.status as OrderStatus) || 'received',
-              round: data.round ? Number(data.round) : 1,
-              isDemo: Boolean(data.isDemo),
-              createdAt: Number(data.createdAt) || Date.now(),
-              updatedAt: data.updatedAt ? Number(data.updatedAt) : undefined,
-            });
+            list.push(this.mapFirestoreOrder(d.id, d.data()));
           });
           this.orders = list;
           this.notifyOrderListeners();
@@ -774,6 +768,140 @@ class StoreService {
     };
   }
 
+  /**
+   * Helper to map raw Firestore / local data to Order interface with all canonical fields
+   */
+  public mapFirestoreOrder(id: string, data: any): Order {
+    return {
+      id,
+      orderId: data.orderId || ('SS-' + id.substring(0, 4).toUpperCase()),
+      screen: String(data.screen || '1'),
+      row: String(data.row || 'A').toUpperCase(),
+      col: data.col !== undefined ? data.col : data.seat,
+      seat: String(data.seat || '1'),
+      items: Array.isArray(data.items) ? data.items : [],
+      total: Number(data.total) || 0,
+      notes: data.notes || data.note || '',
+      note: data.note || data.notes || '',
+      status: (data.status as OrderStatus) || 'received',
+      paymentMethod: data.paymentMethod || 'pay_at_seat',
+      paymentStatus: data.paymentStatus || 'paid',
+      paidAt: data.paidAt ? Number(data.paidAt) : undefined,
+      round: data.round ? Number(data.round) : 1,
+      isDemo: Boolean(data.isDemo),
+      createdAt: Number(data.createdAt) || Date.now(),
+      updatedAt: data.updatedAt ? Number(data.updatedAt) : undefined,
+    };
+  }
+
+  /**
+   * Subscribes to orders for a specific day in Asia/Kolkata (IST).
+   * - If date is "Today": sets up a real-time Firestore listener on [startOfDay, endOfDay], ordered newest first.
+   * - If date is a past day: performs a one-time fetch on [startOfDay, endOfDay].
+   * - Gracefully falls back / merges with in-memory orders.
+   */
+  public subscribeOrdersByDay(
+    dateInput: DateInput,
+    callback: (orders: Order[]) => void
+  ): () => void {
+    const dayStart = startOfDay(dateInput);
+    const dayEnd = endOfDay(dateInput);
+    const isCurrentDay = isToday(dateInput);
+
+    const getLocalDayOrders = () => {
+      return this.orders
+        .filter((o) => o.createdAt >= dayStart && o.createdAt <= dayEnd)
+        .sort((a, b) => b.createdAt - a.createdAt);
+    };
+
+    // Immediate callback with cached local orders for snappy UI
+    callback(getLocalDayOrders());
+
+    if (!this.db) {
+      // Local fallback
+      const unsub = this.subscribeOrders(() => {
+        callback(getLocalDayOrders());
+      });
+      return unsub;
+    }
+
+    try {
+      const ordersRef = collection(this.db, 'orders');
+      const q = query(
+        ordersRef,
+        where('createdAt', '>=', dayStart),
+        where('createdAt', '<=', dayEnd),
+        orderBy('createdAt', 'desc')
+      );
+
+      if (isCurrentDay) {
+        // Real-time listener when "Today" is selected
+        const unsubscribe = onSnapshot(
+          q,
+          (snapshot) => {
+            const list: Order[] = [];
+            snapshot.forEach((d) => {
+              list.push(this.mapFirestoreOrder(d.id, d.data()));
+            });
+            callback(list);
+          },
+          (err) => {
+            console.warn('Firestore day orders listener error, using local fallback:', err);
+            callback(getLocalDayOrders());
+          }
+        );
+        return unsubscribe;
+      } else {
+        // Normal one-time fetch for past days
+        getDocs(q)
+          .then((snapshot) => {
+            const list: Order[] = [];
+            snapshot.forEach((d) => {
+              list.push(this.mapFirestoreOrder(d.id, d.data()));
+            });
+            callback(list);
+          })
+          .catch((err) => {
+            console.warn('Firestore past day fetch error, using local fallback:', err);
+            callback(getLocalDayOrders());
+          });
+
+        return () => {};
+      }
+    } catch (e) {
+      console.warn('Error setting up day orders query:', e);
+      return () => {};
+    }
+  }
+
+  /**
+   * Fetches orders in an Asia/Kolkata date range for Admin Analytics
+   */
+  public async fetchOrdersForRange(startMs: number, endMs: number): Promise<Order[]> {
+    if (this.db) {
+      try {
+        const ordersRef = collection(this.db, 'orders');
+        const q = query(
+          ordersRef,
+          where('createdAt', '>=', startMs),
+          where('createdAt', '<=', endMs),
+          orderBy('createdAt', 'desc')
+        );
+        const snapshot = await getDocs(q);
+        const list: Order[] = [];
+        snapshot.forEach((d) => {
+          list.push(this.mapFirestoreOrder(d.id, d.data()));
+        });
+        return list;
+      } catch (err) {
+        console.warn('fetchOrdersForRange Firestore error, using local fallback:', err);
+      }
+    }
+    return this.orders
+      .filter((o) => o.createdAt >= startMs && o.createdAt <= endMs)
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }
+
   public subscribeScreens(cb: (screens: Record<string, ScreenGridConfig>) => void): () => void {
     this.screenListeners.push(cb);
     cb({ ...this.screens });
@@ -893,10 +1021,15 @@ class StoreService {
   public async placeOrder(orderData: {
     screen: string;
     row: string;
+    col?: string | number;
     seat: string;
     items: Order['items'];
     total: number;
     notes?: string;
+    status?: OrderStatus;
+    paymentMethod?: string;
+    paymentStatus?: string;
+    paidAt?: number;
     round?: number;
     isDemo?: boolean;
   }): Promise<Order> {
@@ -910,12 +1043,16 @@ class StoreService {
       orderId,
       screen: String(orderData.screen),
       row: cleanRow,
+      col: orderData.col !== undefined ? orderData.col : cleanSeat,
       seat: cleanSeat,
       items: orderData.items,
       total: orderData.total,
       notes: orderData.notes || '',
       note: orderData.notes || '',
-      status: 'received',
+      status: orderData.status || 'received',
+      paymentMethod: orderData.paymentMethod || 'pay_at_seat',
+      paymentStatus: orderData.paymentStatus || 'paid',
+      paidAt: orderData.paidAt || (orderData.paymentStatus === 'paid' ? Date.now() : undefined),
       round: orderData.round || 1,
       createdAt: Date.now(),
       isDemo: Boolean(orderData.isDemo),
@@ -937,11 +1074,15 @@ class StoreService {
           orderId: newOrder.orderId,
           screen: newOrder.screen,
           row: newOrder.row,
+          col: newOrder.col,
           seat: newOrder.seat,
           items: newOrder.items,
           total: newOrder.total,
           notes: newOrder.notes,
           status: newOrder.status,
+          paymentMethod: newOrder.paymentMethod,
+          paymentStatus: newOrder.paymentStatus,
+          paidAt: newOrder.paidAt || null,
           round: newOrder.round || 1,
           createdAt: newOrder.createdAt,
           isDemo: Boolean(newOrder.isDemo),
@@ -1536,19 +1677,33 @@ class StoreService {
     }
   }
 
-  // --- Sales Summary ---
-  public getSalesSummary() {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayTimestamp = today.getTime();
+  // --- Sales & Order Analytics in Asia/Kolkata (IST) ---
+  public getSalesSummary(dateRange?: { start?: DateInput; end?: DateInput }) {
+    const rangeStart = dateRange?.start !== undefined ? startOfDay(dateRange.start) : startOfDay();
+    const rangeEnd = dateRange?.end !== undefined ? endOfDay(dateRange.end) : endOfDay();
 
-    const todayOrders = this.orders.filter((o) => o.createdAt >= todayTimestamp);
-    const totalOrdersToday = todayOrders.length;
-    const totalRevenueToday = todayOrders.reduce((sum, o) => sum + o.total, 0);
+    // Orders within date range
+    const ordersInRange = this.orders.filter(
+      (o) => o.createdAt >= rangeStart && o.createdAt <= rangeEnd
+    );
 
-    // Item sales counts
+    // Filter out unpaid/awaiting payment and cancelled orders from revenue
+    const isUnpaid = (o: Order) =>
+      o.status.toLowerCase() === 'awaiting_payment' ||
+      o.status.toLowerCase() === 'awaiting payment' ||
+      o.paymentStatus === 'unpaid';
+
+    const isCancelled = (o: Order) => o.status.toLowerCase() === 'cancelled';
+
+    const validRevenueOrders = ordersInRange.filter((o) => !isCancelled(o) && !isUnpaid(o));
+    const totalRevenue = validRevenueOrders.reduce((sum, o) => sum + o.total, 0);
+    const totalOrdersCount = validRevenueOrders.length;
+    const unpaidAttemptsCount = ordersInRange.filter(isUnpaid).length;
+    const cancelledCount = ordersInRange.filter(isCancelled).length;
+
+    // Item sales breakdown
     const itemCountMap: Record<string, { name: string; qty: number; revenue: number }> = {};
-    this.orders.forEach((o) => {
+    validRevenueOrders.forEach((o) => {
       o.items.forEach((item) => {
         if (!itemCountMap[item.name]) {
           itemCountMap[item.name] = { name: item.name, qty: 0, revenue: 0 };
@@ -1560,14 +1715,72 @@ class StoreService {
 
     const topSellingItems = Object.values(itemCountMap)
       .sort((a, b) => b.qty - a.qty)
-      .slice(0, 5);
+      .slice(0, 8);
+
+    // Hourly distribution in Asia/Kolkata
+    const hourlySales: Record<number, { hour: number; label: string; count: number; revenue: number }> = {};
+    for (let h = 0; h < 24; h++) {
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      const dispHour = h % 12 === 0 ? 12 : h % 12;
+      hourlySales[h] = {
+        hour: h,
+        label: `${String(dispHour).padStart(2, '0')}:00 ${ampm}`,
+        count: 0,
+        revenue: 0,
+      };
+    }
+    validRevenueOrders.forEach((o) => {
+      const h = getHour(o.createdAt);
+      if (hourlySales[h]) {
+        hourlySales[h].count += 1;
+        hourlySales[h].revenue += o.total;
+      }
+    });
+
+    // Screen distribution
+    const screenSales: Record<string, { screen: string; count: number; revenue: number }> = {};
+    validRevenueOrders.forEach((o) => {
+      const scr = `Screen ${o.screen || '1'}`;
+      if (!screenSales[scr]) {
+        screenSales[scr] = { screen: scr, count: 0, revenue: 0 };
+      }
+      screenSales[scr].count += 1;
+      screenSales[scr].revenue += o.total;
+    });
+
+    // Payment method breakdown
+    let cashCount = 0;
+    let cashRevenue = 0;
+    let onlineCount = 0;
+    let onlineRevenue = 0;
+
+    validRevenueOrders.forEach((o) => {
+      const method = (o.paymentMethod || '').toLowerCase();
+      if (method.includes('online') || method.includes('upi') || method.includes('card')) {
+        onlineCount += 1;
+        onlineRevenue += o.total;
+      } else {
+        cashCount += 1;
+        cashRevenue += o.total;
+      }
+    });
 
     return {
-      totalOrdersToday,
-      totalRevenueToday,
+      totalOrdersToday: totalOrdersCount,
+      totalRevenueToday: totalRevenue,
       topSellingItems,
-      allOrdersCount: this.orders.length,
-      allRevenue: this.orders.reduce((sum, o) => sum + o.total, 0),
+      allOrdersCount: ordersInRange.length,
+      validOrdersCount: totalOrdersCount,
+      allRevenue: totalRevenue,
+      unpaidAttemptsCount,
+      cancelledCount,
+      averageOrderValue: totalOrdersCount > 0 ? Math.round(totalRevenue / totalOrdersCount) : 0,
+      hourlySales: Object.values(hourlySales),
+      screenSales: Object.values(screenSales),
+      paymentBreakdown: {
+        cash: { count: cashCount, revenue: cashRevenue },
+        online: { count: onlineCount, revenue: onlineRevenue },
+      },
     };
   }
 

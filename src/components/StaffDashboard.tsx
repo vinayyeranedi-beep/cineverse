@@ -28,6 +28,14 @@ import {
   Bell,
   Trash2,
   Loader2,
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  CreditCard,
+  Banknote,
+  Ban,
+  TrendingUp,
 } from 'lucide-react';
 import {
   Order,
@@ -42,6 +50,18 @@ import { storeService, getRowLetter } from '../services/store';
 import { soundService } from '../services/sound';
 import { TicketsManagementView } from './TicketsManagementView';
 import { CineverseLogo } from './CineverseLogo';
+import {
+  startOfDay,
+  endOfDay,
+  formatTime,
+  formatDay,
+  getHour,
+  isToday,
+  isYesterday,
+  addDays,
+  getISODateString,
+  formatRelativeTime,
+} from '../lib/dates';
 
 interface StaffDashboardProps {
   orders: Order[];
@@ -50,15 +70,25 @@ interface StaffDashboardProps {
   menuItems?: MenuItem[];
 }
 
-type QueueTab = 'all' | 'new' | 'in_progress' | 'completed';
+type QueueTab = 'all' | 'new' | 'preparing' | 'ready' | 'delivered' | 'cancelled';
 type LayoutMode = 'split' | 'queue' | 'map';
 
 export const StaffDashboard: React.FC<StaffDashboardProps> = ({
-  orders,
+  orders: initialOrders,
   currentUser,
   isDemoMode,
   menuItems = [],
 }) => {
+  // Day Selector state in Asia/Kolkata (IST)
+  const [selectedDate, setSelectedDate] = useState<Date>(() => new Date());
+  const [dayOrders, setDayOrders] = useState<Order[]>(() => {
+    const todayStart = startOfDay();
+    const todayEnd = endOfDay();
+    return initialOrders.filter((o) => o.createdAt >= todayStart && o.createdAt <= todayEnd);
+  });
+  const [isLoadingDay, setIsLoadingDay] = useState(false);
+  const [showUnpaidModal, setShowUnpaidModal] = useState(false);
+
   const [queueTab, setQueueTab] = useState<QueueTab>('all');
   const [searchSeat, setSearchSeat] = useState('');
   const [highlightOrderId, setHighlightOrderId] = useState<string | null>(null);
@@ -98,8 +128,6 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
   const [tickets, setTickets] = useState<Ticket[]>(() => storeService.getTickets());
   const [staffTab, setStaffTab] = useState<'orders' | 'tickets'>('orders');
 
-
-
   useEffect(() => {
     const unsub = storeService.subscribeScreens((sc) => setScreensMap(sc));
     const unsubTickets = storeService.subscribeTickets((t) => setTickets(t));
@@ -111,28 +139,42 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
 
   const openTicketsCount = tickets.filter((t) => t.status === 'open').length;
 
-  // Track previous orders to trigger audio chime and visual pulse on incoming order
-  const prevOrdersCountRef = useRef(orders.length);
-  const prevOrderIdsRef = useRef<Set<string>>(new Set(orders.map((o) => o.id)));
+  // Day Orders Subscription:
+  // - Real-time listener when "Today" is selected
+  // - One-time fetch for past days
+  useEffect(() => {
+    setIsLoadingDay(true);
+    const unsub = storeService.subscribeOrdersByDay(selectedDate, (ords) => {
+      setDayOrders(ords);
+      setIsLoadingDay(false);
+    });
+    return () => unsub();
+  }, [selectedDate]);
+
+  // Track new incoming orders on "Today" to trigger audio chime and visual highlight
+  const prevTodayOrderIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    const currentIds = new Set(orders.map((o) => o.id));
-    const newOrders = orders.filter((o) => !prevOrderIdsRef.current.has(o.id));
+    if (!isToday(selectedDate)) return;
 
-    if (newOrders.length > 0) {
-      const newest = newOrders[0];
-      setHighlightOrderId(newest.id);
-      soundService.playNewOrderSound();
+    const currentIds = new Set(dayOrders.map((o) => o.id));
 
-      const timer = setTimeout(() => {
-        setHighlightOrderId(null);
-      }, 6000);
-      return () => clearTimeout(timer);
+    if (prevTodayOrderIdsRef.current.size > 0) {
+      const newOrders = dayOrders.filter((o) => !prevTodayOrderIdsRef.current.has(o.id));
+      if (newOrders.length > 0) {
+        const newest = newOrders[0];
+        setHighlightOrderId(newest.id);
+        soundService.playNewOrderSound();
+
+        const timer = setTimeout(() => {
+          setHighlightOrderId(null);
+        }, 6000);
+        return () => clearTimeout(timer);
+      }
     }
 
-    prevOrderIdsRef.current = currentIds;
-    prevOrdersCountRef.current = orders.length;
-  }, [orders]);
+    prevTodayOrderIdsRef.current = currentIds;
+  }, [dayOrders, selectedDate]);
 
   // Auth handlers
   const handleLogin = async (e: React.FormEvent) => {
@@ -160,11 +202,11 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
     }
   };
 
-  // Status transitions: received -> preparing -> on_the_way -> delivered
+  // Status transitions: received -> preparing -> ready/on_the_way -> delivered / cancelled
   const handleStatusChange = async (orderId: string, nextStatus: OrderStatus) => {
     try {
       await storeService.updateOrderStatus(orderId, nextStatus);
-      if (nextStatus === 'on_the_way') {
+      if (nextStatus === 'on_the_way' || nextStatus === 'ready') {
         soundService.playReadySound();
       }
     } catch (err) {
@@ -173,47 +215,127 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
     }
   };
 
-  // Filter orders by tab & search query
+  // Separate Unpaid Online Attempts from Normal Queue
+  const isAwaitingPayment = (o: Order) => {
+    const s = (o.status || '').toLowerCase();
+    const ps = (o.paymentStatus || '').toLowerCase();
+    return s === 'awaiting_payment' || s === 'awaiting payment' || ps === 'unpaid' || ps === 'awaiting_payment';
+  };
+
+  const unpaidAttempts = useMemo(() => {
+    return dayOrders.filter(isAwaitingPayment);
+  }, [dayOrders]);
+
+  const validDayOrders = useMemo(() => {
+    return dayOrders.filter((o) => !isAwaitingPayment(o));
+  }, [dayOrders]);
+
+  // Summary Bar Counts & Totals for the Selected Day
+  const totalOrdersCount = validDayOrders.length;
+  const receivedCount = validDayOrders.filter((o) => o.status === 'received').length;
+  const preparingCount = validDayOrders.filter((o) => o.status === 'preparing').length;
+  const readyCount = validDayOrders.filter((o) => o.status === 'ready' || o.status === 'on_the_way').length;
+  const deliveredCount = validDayOrders.filter((o) => o.status === 'delivered').length;
+  const cancelledCount = validDayOrders.filter((o) => o.status === 'cancelled').length;
+  const totalSalesAmount = validDayOrders
+    .filter((o) => o.status !== 'cancelled')
+    .reduce((sum, o) => sum + o.total, 0);
+
+  // Filter valid day orders by active tab & seat/order search query
   const filteredOrders = useMemo(() => {
-    return orders.filter((order) => {
+    return validDayOrders.filter((order) => {
       // Tab matching
       let matchesTab = true;
       if (queueTab === 'new') {
         matchesTab = order.status === 'received';
-      } else if (queueTab === 'in_progress') {
-        matchesTab = order.status === 'preparing' || order.status === 'on_the_way';
-      } else if (queueTab === 'completed') {
+      } else if (queueTab === 'preparing') {
+        matchesTab = order.status === 'preparing';
+      } else if (queueTab === 'ready') {
+        matchesTab = order.status === 'ready' || order.status === 'on_the_way';
+      } else if (queueTab === 'delivered') {
         matchesTab = order.status === 'delivered';
+      } else if (queueTab === 'cancelled') {
+        matchesTab = order.status === 'cancelled';
       }
 
-      // Seat search matching
-      const seatString = `Screen ${order.screen} ${order.row}${order.seat}`.toLowerCase();
+      // Seat & ID search matching (e.g. "F12", "Screen 2", "SS-4819")
+      const searchTarget = `${order.row}${order.seat} ${order.seat} ${order.row} Screen ${order.screen} ${order.orderId || ''}`.toLowerCase();
       const matchesSearch =
-        !searchSeat.trim() || seatString.includes(searchSeat.trim().toLowerCase());
+        !searchSeat.trim() || searchTarget.includes(searchSeat.trim().toLowerCase());
 
       return matchesTab && matchesSearch;
     });
-  }, [orders, queueTab, searchSeat]);
-
-  // Counts for tabs
-  const newCount = orders.filter((o) => o.status === 'received').length;
-  const inProgressCount = orders.filter(
-    (o) => o.status === 'preparing' || o.status === 'on_the_way'
-  ).length;
-  const completedCount = orders.filter((o) => o.status === 'delivered').length;
+  }, [validDayOrders, queueTab, searchSeat]);
 
   // Active orders map by seat for the Live Seat Map
-  // Key: `${screen}-${row}${seat}`
   const seatOrdersMap = useMemo(() => {
     const map: Record<string, Order> = {};
-    for (const ord of orders) {
-      if (ord.status !== 'delivered') {
+    for (const ord of validDayOrders) {
+      if (ord.status !== 'delivered' && ord.status !== 'cancelled') {
         const key = `${ord.screen}-${ord.row.toUpperCase()}${ord.seat}`;
         map[key] = ord;
       }
     }
     return map;
-  }, [orders]);
+  }, [validDayOrders]);
+
+  // CSV Export for the Selected Day
+  const handleDownloadDayCSV = () => {
+    if (validDayOrders.length === 0) {
+      alert('No orders on this day to export.');
+      return;
+    }
+
+    const headers = [
+      'Time (IST)',
+      'Screen',
+      'Seat',
+      'Items',
+      'Quantity',
+      'Total (INR)',
+      'Payment Method',
+      'Payment Status',
+      'Status',
+    ];
+
+    const rows = validDayOrders.map((o) => {
+      const timeStr = formatTime(o.createdAt);
+      const screenStr = `Screen ${o.screen}`;
+      const seatStr = `${o.row}${o.seat}`;
+      const itemsStr = o.items.map((it) => `${it.name} (x${it.qty})`).join('; ');
+      const totalQty = o.items.reduce((sum, it) => sum + it.qty, 0);
+      const totalStr = o.total;
+      const methodStr = (o.paymentMethod || 'Pay at seat').replace('_', ' ');
+      const payStatusStr = o.paymentStatus || 'paid';
+      const statusStr = o.status === 'on_the_way' ? 'Ready / Out for delivery' : o.status;
+
+      return [
+        `"${timeStr}"`,
+        `"${screenStr}"`,
+        `"${seatStr}"`,
+        `"${itemsStr.replace(/"/g, '""')}"`,
+        totalQty,
+        totalStr,
+        `"${methodStr}"`,
+        `"${payStatusStr}"`,
+        `"${statusStr}"`,
+      ].join(',');
+    });
+
+    const csvContent = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute(
+      'download',
+      `cineverse-day-orders-${getISODateString(selectedDate)}.csv`
+    );
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   // Handle Manual Order Submission
   const handlePlaceManualOrder = async (e: React.FormEvent) => {
@@ -459,7 +581,7 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
             <ChefHat className="w-4 h-4" />
             <span>Orders Queue</span>
             <span className="px-1.5 py-0.2 rounded-md text-[10px] bg-black/30 font-bold">
-              {orders.length}
+              {validDayOrders.length}
             </span>
           </button>
 
@@ -497,230 +619,497 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
           />
         ) : (
           <>
-            {/* Status Counters & Filters Bar */}
-            <div className="bg-[#15151C] border border-zinc-800 rounded-3xl p-3.5 sm:p-4 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-3">
-          {/* Order Tabs */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
-            {[
-              { id: 'all', label: 'All Orders', count: orders.length },
-              { id: 'new', label: 'New / Received', count: newCount, color: 'text-rose-400' },
-              { id: 'in_progress', label: 'In Progress', count: inProgressCount, color: 'text-sky-400' },
-              { id: 'completed', label: 'Completed', count: completedCount, color: 'text-emerald-400' },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setQueueTab(tab.id as QueueTab)}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap min-h-[38px] ${
-                  queueTab === tab.id
-                    ? 'bg-[#E50914] text-white shadow-md shadow-[#E50914]/25'
-                    : 'bg-[#0B0B0F] text-[#A1A1AA] hover:text-white border border-zinc-800'
-                }`}
-              >
-                <span>{tab.label}</span>
-                <span
-                  className={`px-1.5 py-0.2 rounded-md text-[10px] font-bold ${
-                    queueTab === tab.id ? 'bg-black/30 text-white' : 'bg-zinc-800 text-zinc-300'
+            {/* ============================================================ */}
+            {/* DAY SELECTOR BAR (Asia/Kolkata Timezone) */}
+            {/* ============================================================ */}
+            <div className="bg-[#15151C] border border-zinc-800 rounded-3xl p-4 sm:p-5 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+              {/* Day Navigators: Previous, Today, Yesterday, Next, Date Picker */}
+              <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                {/* Previous Day Arrow */}
+                <button
+                  onClick={() => setSelectedDate((prev) => addDays(prev, -1))}
+                  title="Move to Previous Day"
+                  className="w-10 h-10 rounded-xl bg-[#0B0B0F] border border-zinc-800 text-zinc-300 hover:text-white hover:border-[#D4AF37]/60 flex items-center justify-center transition-all min-h-[40px] min-w-[40px] active:scale-95"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+
+                {/* Today Button */}
+                <button
+                  onClick={() => setSelectedDate(new Date())}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all min-h-[40px] ${
+                    isToday(selectedDate)
+                      ? 'bg-[#E50914] text-white shadow-md shadow-[#E50914]/30'
+                      : 'bg-[#0B0B0F] text-zinc-400 hover:text-white border border-zinc-800'
                   }`}
                 >
-                  {tab.count}
-                </span>
-              </button>
-            ))}
-          </div>
+                  Today
+                </button>
 
-          {/* Quick Search */}
-          <div className="relative sm:w-72">
-            <Search className="w-4 h-4 text-[#A1A1AA] absolute left-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchSeat}
-              onChange={(e) => setSearchSeat(e.target.value)}
-              placeholder="Search seat e.g. B7, Screen 1..."
-              className="w-full bg-[#0B0B0F] border border-zinc-800 rounded-xl pl-10 pr-3.5 py-2 text-xs text-white placeholder-[#A1A1AA] focus:outline-none focus:border-[#D4AF37]"
-            />
-          </div>
-        </div>
+                {/* Yesterday Button */}
+                <button
+                  onClick={() => setSelectedDate(addDays(new Date(), -1))}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all min-h-[40px] ${
+                    isYesterday(selectedDate)
+                      ? 'bg-[#E50914] text-white shadow-md shadow-[#E50914]/30'
+                      : 'bg-[#0B0B0F] text-zinc-400 hover:text-white border border-zinc-800'
+                  }`}
+                >
+                  Yesterday
+                </button>
 
-        {/* Main Content Area: Split View between Order Cards & Live Seat Map */}
-        <div
-          className={`grid gap-5 ${
-            layoutMode === 'split'
-              ? 'grid-cols-1 lg:grid-cols-12'
-              : 'grid-cols-1'
-          }`}
-        >
-          {/* LEFT: ORDER QUEUE CARDS */}
-          {(layoutMode === 'split' || layoutMode === 'queue') && (
-            <div
-              className={`space-y-4 ${
-                layoutMode === 'split' ? 'lg:col-span-7 xl:col-span-7' : 'w-full'
-              }`}
-            >
-              <div className="flex items-center justify-between px-1">
-                <span className="text-xs font-bold text-[#A1A1AA] uppercase tracking-wider">
-                  Live Order Queue ({filteredOrders.length})
+                {/* Next Day Arrow (Disabled if Today) */}
+                <button
+                  onClick={() => setSelectedDate((prev) => addDays(prev, 1))}
+                  disabled={isToday(selectedDate)}
+                  title={isToday(selectedDate) ? 'Cannot navigate to future date' : 'Move to Next Day'}
+                  className={`w-10 h-10 rounded-xl bg-[#0B0B0F] border border-zinc-800 flex items-center justify-center transition-all min-h-[40px] min-w-[40px] ${
+                    isToday(selectedDate)
+                      ? 'opacity-30 cursor-not-allowed text-zinc-600'
+                      : 'text-zinc-300 hover:text-white hover:border-[#D4AF37]/60 active:scale-95'
+                  }`}
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+
+                {/* Date Picker Input */}
+                <div className="relative">
+                  <input
+                    type="date"
+                    max={getISODateString(new Date())}
+                    value={getISODateString(selectedDate)}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        setSelectedDate(new Date(e.target.value + 'T12:00:00+05:30'));
+                      }
+                    }}
+                    title="Pick any cinema day"
+                    className="bg-[#0B0B0F] border border-zinc-800 hover:border-[#D4AF37]/50 rounded-xl px-3 py-2 text-xs font-medium text-white focus:outline-none focus:border-[#D4AF37] cursor-pointer min-h-[40px]"
+                  />
+                </div>
+              </div>
+
+              {/* Active Day Display & CSV Download */}
+              <div className="flex flex-wrap items-center justify-between sm:justify-end gap-3">
+                <div className="flex items-center gap-2.5">
+                  <Calendar className="w-5 h-5 text-[#D4AF37]" />
+                  <span className="text-base sm:text-lg font-display font-black text-white tracking-wide">
+                    {formatDay(selectedDate, 'long')}
+                  </span>
+                  {isToday(selectedDate) ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                      LIVE (IST)
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-800 text-zinc-400 border border-zinc-700">
+                      ARCHIVED (IST)
+                    </span>
+                  )}
+                </div>
+
+                {/* Download Day as CSV */}
+                <button
+                  onClick={handleDownloadDayCSV}
+                  title="Download this day as CSV"
+                  className="px-3.5 py-2 rounded-xl bg-[#0B0B0F] hover:bg-zinc-800 text-[#D4AF37] hover:text-white border border-[#D4AF37]/40 hover:border-[#D4AF37] text-xs font-bold flex items-center gap-1.5 transition-all min-h-[40px] shadow-sm active:scale-95"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Download Day CSV</span>
+                </button>
+              </div>
+            </div>
+
+            {/* ============================================================ */}
+            {/* SUMMARY BAR FOR SELECTED DAY */}
+            {/* ============================================================ */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5 sm:gap-3">
+              {/* Total Orders */}
+              <div className="bg-[#15151C] border border-zinc-800 rounded-2xl p-3 shadow-lg">
+                <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">
+                  Total Orders
                 </span>
-                <span className="text-[11px] text-[#A1A1AA]">
-                  Newest orders trigger sound & flashing highlight
+                <span className="text-xl sm:text-2xl font-display font-black text-white mt-1 block">
+                  {totalOrdersCount}
                 </span>
               </div>
 
-              {filteredOrders.length === 0 ? (
-                <div className="bg-[#15151C] border border-zinc-800 rounded-3xl p-12 text-center">
-                  <PackageCheck className="w-12 h-12 text-zinc-600 mx-auto mb-3" />
-                  <h3 className="text-base font-bold text-white">No active orders</h3>
-                  <p className="text-xs text-[#A1A1AA] mt-1">
-                    Orders placed from customer armrest QRs will appear here instantly.
-                  </p>
+              {/* Received */}
+              <div className="bg-[#15151C] border border-[#E50914]/30 rounded-2xl p-3 shadow-lg">
+                <span className="text-[10px] font-bold text-[#E50914] uppercase tracking-wider block">
+                  Received
+                </span>
+                <span className="text-xl sm:text-2xl font-display font-black text-[#E50914] mt-1 block">
+                  {receivedCount}
+                </span>
+              </div>
+
+              {/* Preparing */}
+              <div className="bg-[#15151C] border border-blue-500/30 rounded-2xl p-3 shadow-lg">
+                <span className="text-[10px] font-bold text-sky-400 uppercase tracking-wider block">
+                  Preparing
+                </span>
+                <span className="text-xl sm:text-2xl font-display font-black text-sky-400 mt-1 block">
+                  {preparingCount}
+                </span>
+              </div>
+
+              {/* Ready */}
+              <div className="bg-[#15151C] border border-[#D4AF37]/30 rounded-2xl p-3 shadow-lg">
+                <span className="text-[10px] font-bold text-[#D4AF37] uppercase tracking-wider block">
+                  Ready / Out
+                </span>
+                <span className="text-xl sm:text-2xl font-display font-black text-[#D4AF37] mt-1 block">
+                  {readyCount}
+                </span>
+              </div>
+
+              {/* Delivered */}
+              <div className="bg-[#15151C] border border-emerald-500/30 rounded-2xl p-3 shadow-lg">
+                <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block">
+                  Delivered
+                </span>
+                <span className="text-xl sm:text-2xl font-display font-black text-emerald-400 mt-1 block">
+                  {deliveredCount}
+                </span>
+              </div>
+
+              {/* Cancelled */}
+              <div className="bg-[#15151C] border border-rose-500/20 rounded-2xl p-3 shadow-lg">
+                <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider block">
+                  Cancelled
+                </span>
+                <span className="text-xl sm:text-2xl font-display font-black text-rose-400 mt-1 block">
+                  {cancelledCount}
+                </span>
+              </div>
+
+              {/* Total Sales Amount */}
+              <div className="col-span-2 sm:col-span-2 lg:col-span-1 bg-gradient-to-br from-[#1A1A24] to-[#15151C] border border-[#D4AF37]/50 rounded-2xl p-3 shadow-lg shadow-[#D4AF37]/10">
+                <span className="text-[10px] font-bold text-[#D4AF37] uppercase tracking-wider block">
+                  Day Sales
+                </span>
+                <span className="text-xl sm:text-2xl font-display font-black text-white mt-1 block">
+                  ₹{totalSalesAmount}
+                </span>
+              </div>
+            </div>
+
+            {/* UNPAID ATTEMPTS SMALL COUNT BANNER */}
+            {unpaidAttempts.length > 0 && (
+              <div className="p-3 px-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-xs text-amber-300 shadow-md">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>
+                    <strong>Unpaid attempts: {unpaidAttempts.length}</strong> (patrons initiated online orders but did not complete checkout)
+                  </span>
                 </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {filteredOrders.map((order) => {
-                    const isHighlighted = highlightOrderId === order.id;
-                    const seatLabel = `${order.row}${order.seat}`;
+                <button
+                  onClick={() => setShowUnpaidModal(true)}
+                  className="px-3 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-bold text-xs transition-colors"
+                >
+                  View Details
+                </button>
+              </div>
+            )}
 
-                    return (
-                      <div
-                        key={order.id}
-                        className={`rounded-2xl border transition-all flex flex-col justify-between overflow-hidden shadow-xl ${
-                          isHighlighted
-                            ? 'bg-[#E50914]/20 border-[#E50914] ring-2 ring-[#E50914]/80 shadow-[#E50914]/30 animate-pulse'
-                            : order.status === 'received'
-                            ? 'bg-[#15151C] border-[#E50914]/50'
-                            : order.status === 'preparing'
-                            ? 'bg-[#15151C] border-[#2563EB]/50'
-                            : order.status === 'on_the_way'
-                            ? 'bg-[#15151C] border-[#D4AF37]/50'
-                            : 'bg-[#15151C]/60 border-zinc-800 opacity-70'
-                        }`}
-                      >
-                        {/* Card Header: LARGE SEAT NUMBER */}
-                        <div className="p-4 bg-[#0B0B0F] border-b border-zinc-800/80 flex items-start justify-between gap-3">
-                          <div>
-                            {/* LARGE BOLD SEAT ID */}
-                            <div className="flex items-center gap-2">
-                              <span className="text-2xl font-display font-black text-[#D4AF37] tracking-wider">
-                                {seatLabel}
-                              </span>
-                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-zinc-800 text-[#A1A1AA] uppercase">
-                                Screen {order.screen}
-                              </span>
-                              {order.isDemo && (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
-                                  Demo data
-                                </span>
-                              )}
-                            </div>
-                            <span className="text-[11px] text-[#A1A1AA] flex items-center gap-1 mt-1 font-mono">
-                              <Clock className="w-3 h-3 text-zinc-500" />
-                              {new Date(order.createdAt).toLocaleTimeString([], {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })}
-                            </span>
-                          </div>
+            {/* STATUS FILTER TABS & SEARCH BAR */}
+            <div className="bg-[#15151C] border border-zinc-800 rounded-3xl p-3.5 sm:p-4 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-3">
+              {/* Order Tabs */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
+                {[
+                  { id: 'all', label: 'All Orders', count: validDayOrders.length },
+                  { id: 'new', label: 'New / Received', count: receivedCount, color: 'text-rose-400' },
+                  { id: 'preparing', label: 'Preparing', count: preparingCount, color: 'text-sky-400' },
+                  { id: 'ready', label: 'Ready', count: readyCount, color: 'text-amber-400' },
+                  { id: 'delivered', label: 'Delivered', count: deliveredCount, color: 'text-emerald-400' },
+                  { id: 'cancelled', label: 'Cancelled', count: cancelledCount, color: 'text-zinc-500' },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setQueueTab(tab.id as QueueTab)}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap min-h-[38px] ${
+                      queueTab === tab.id
+                        ? 'bg-[#E50914] text-white shadow-md shadow-[#E50914]/25'
+                        : 'bg-[#0B0B0F] text-[#A1A1AA] hover:text-white border border-zinc-800'
+                    }`}
+                  >
+                    <span>{tab.label}</span>
+                    <span
+                      className={`px-1.5 py-0.2 rounded-md text-[10px] font-bold ${
+                        queueTab === tab.id ? 'bg-black/30 text-white' : 'bg-zinc-800 text-zinc-300'
+                      }`}
+                    >
+                      {tab.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
 
-                          {/* Status Badge */}
-                          <div className="text-right">
-                            <span
-                              className={`inline-block px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${
-                                order.status === 'received'
-                                  ? 'bg-[#E50914]/20 text-[#E50914] border border-[#E50914]/30'
-                                  : order.status === 'preparing'
-                                  ? 'bg-[#2563EB]/20 text-[#2563EB] border border-[#2563EB]/30'
-                                  : order.status === 'on_the_way'
-                                  ? 'bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/30'
-                                  : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                              }`}
-                            >
-                              {order.status === 'on_the_way' ? 'Out for Delivery' : order.status}
-                            </span>
-                            <span className="block font-mono font-bold text-sm text-white mt-1">
-                              ₹{order.total}
-                            </span>
-                          </div>
-                        </div>
+              {/* Quick Search */}
+              <div className="relative sm:w-72">
+                <Search className="w-4 h-4 text-[#A1A1AA] absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchSeat}
+                  onChange={(e) => setSearchSeat(e.target.value)}
+                  placeholder="Search seat e.g. F12, B7, Screen 1..."
+                  className="w-full bg-[#0B0B0F] border border-zinc-800 rounded-xl pl-10 pr-3.5 py-2 text-xs text-white placeholder-[#A1A1AA] focus:outline-none focus:border-[#D4AF37]"
+                />
+              </div>
+            </div>
 
-                        {/* Order Items List */}
-                        <div className="p-4 flex-1 space-y-2">
-                          <div className="space-y-1.5">
-                            {order.items.map((it, idx) => (
-                              <div
-                                key={idx}
-                                className="flex items-center justify-between text-xs py-0.5"
-                              >
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <span className="w-5 h-5 rounded bg-[#D4AF37]/15 text-[#D4AF37] font-mono font-bold text-[11px] flex items-center justify-center shrink-0">
-                                    {it.qty}
+            {/* Main Content Area: Split View between Order Cards & Live Seat Map */}
+            <div
+              className={`grid gap-5 ${
+                layoutMode === 'split' ? 'grid-cols-1 lg:grid-cols-12' : 'grid-cols-1'
+              }`}
+            >
+              {/* LEFT: ORDER QUEUE CARDS */}
+              {(layoutMode === 'split' || layoutMode === 'queue') && (
+                <div
+                  className={`space-y-4 ${
+                    layoutMode === 'split' ? 'lg:col-span-7 xl:col-span-7' : 'w-full'
+                  }`}
+                >
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-xs font-bold text-[#A1A1AA] uppercase tracking-wider">
+                      Orders Queue ({filteredOrders.length})
+                    </span>
+                    <span className="text-[11px] text-[#A1A1AA]">
+                      {isToday(selectedDate)
+                        ? 'Incoming orders alert with audio chime'
+                        : `Viewing records for ${formatDay(selectedDate)}`}
+                    </span>
+                  </div>
+
+                  {isLoadingDay ? (
+                    <div className="bg-[#15151C] border border-zinc-800 rounded-3xl p-12 text-center flex flex-col items-center justify-center">
+                      <Loader2 className="w-8 h-8 text-[#D4AF37] animate-spin mb-3" />
+                      <p className="text-xs text-zinc-400">Loading orders for {formatDay(selectedDate)}...</p>
+                    </div>
+                  ) : filteredOrders.length === 0 ? (
+                    <div className="bg-[#15151C] border border-zinc-800 rounded-3xl p-12 text-center">
+                      <PackageCheck className="w-12 h-12 text-zinc-600 mx-auto mb-3" />
+                      <h3 className="text-base font-bold text-white">No orders on this day</h3>
+                      <p className="text-xs text-[#A1A1AA] mt-1 max-w-sm mx-auto">
+                        {searchSeat
+                          ? `No orders matching seat "${searchSeat}" on ${formatDay(selectedDate)}.`
+                          : `There are no customer orders recorded for ${formatDay(selectedDate, 'long')}.`}
+                      </p>
+                      {!isToday(selectedDate) && (
+                        <button
+                          onClick={() => setSelectedDate(new Date())}
+                          className="mt-4 px-4 py-2 rounded-xl bg-[#E50914] text-white font-bold text-xs shadow-md shadow-[#E50914]/30"
+                        >
+                          Return to Today
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {filteredOrders.map((order) => {
+                        const isHighlighted = highlightOrderId === order.id;
+                        const seatLabel = `${order.row}${order.seat}`;
+
+                        return (
+                          <div
+                            key={order.id}
+                            className={`rounded-2xl border transition-all flex flex-col justify-between overflow-hidden shadow-xl ${
+                              isHighlighted
+                                ? 'bg-[#E50914]/20 border-[#E50914] ring-2 ring-[#E50914]/80 shadow-[#E50914]/30 animate-pulse'
+                                : order.status === 'received'
+                                ? 'bg-[#15151C] border-[#E50914]/50'
+                                : order.status === 'preparing'
+                                ? 'bg-[#15151C] border-[#2563EB]/50'
+                                : order.status === 'ready' || order.status === 'on_the_way'
+                                ? 'bg-[#15151C] border-[#D4AF37]/50'
+                                : order.status === 'cancelled'
+                                ? 'bg-[#15151C]/40 border-rose-900/40 opacity-60'
+                                : 'bg-[#15151C]/60 border-zinc-800 opacity-75'
+                            }`}
+                          >
+                            {/* Card Header: LARGE SCREEN & SEAT IN BOLD */}
+                            <div className="p-4 bg-[#0B0B0F] border-b border-zinc-800/80 flex items-start justify-between gap-3">
+                              <div>
+                                {/* Large Bold Screen, Row and Seat text */}
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xl sm:text-2xl font-display font-black text-[#D4AF37] tracking-wider">
+                                    SCREEN {order.screen} • {order.row}{order.seat}
                                   </span>
-                                  <span className="font-semibold text-zinc-200 truncate">
-                                    {it.name}
-                                  </span>
+                                  {order.isDemo && (
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                      Demo
+                                    </span>
+                                  )}
                                 </div>
-                                <span className="font-mono text-[#A1A1AA] text-xs shrink-0 ml-2">
-                                  ₹{it.price * it.qty}
+
+                                {/* Order Time (IST) & Time Ago Placed */}
+                                <div className="flex items-center gap-2 mt-1">
+                                  <span className="text-[11px] text-[#A1A1AA] flex items-center gap-1 font-mono">
+                                    <Clock className="w-3 h-3 text-zinc-500" />
+                                    {formatTime(order.createdAt)}
+                                  </span>
+
+                                  {/* How long ago placed for today's open orders */}
+                                  {isToday(selectedDate) &&
+                                    order.status !== 'delivered' &&
+                                    order.status !== 'cancelled' && (
+                                      <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-[#D4AF37]/15 text-[#D4AF37] border border-[#D4AF37]/30">
+                                        {formatRelativeTime(order.createdAt)}
+                                      </span>
+                                    )}
+                                </div>
+                              </div>
+
+                              {/* Status & Payment Badges */}
+                              <div className="text-right space-y-1">
+                                <span
+                                  className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${
+                                    order.status === 'received'
+                                      ? 'bg-[#E50914]/20 text-[#E50914] border border-[#E50914]/30'
+                                      : order.status === 'preparing'
+                                      ? 'bg-[#2563EB]/20 text-[#2563EB] border border-[#2563EB]/30'
+                                      : order.status === 'ready' || order.status === 'on_the_way'
+                                      ? 'bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/30'
+                                      : order.status === 'cancelled'
+                                      ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                                      : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                  }`}
+                                >
+                                  {order.status === 'on_the_way'
+                                    ? 'Ready / Out'
+                                    : order.status}
+                                </span>
+
+                                {/* Payment Badge */}
+                                <div>
+                                  {order.paymentMethod?.toLowerCase().includes('seat') ||
+                                  order.paymentMethod?.toLowerCase().includes('cash') ? (
+                                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 inline-flex items-center gap-1">
+                                      <Banknote className="w-3 h-3" />
+                                      Pay at seat
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 inline-flex items-center gap-1">
+                                      <CheckCircle2 className="w-3 h-3" />
+                                      Paid
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Order Items List */}
+                            <div className="p-4 flex-1 space-y-2">
+                              <div className="space-y-1.5">
+                                {order.items.map((it, idx) => (
+                                  <div
+                                    key={idx}
+                                    className="flex items-center justify-between text-xs py-0.5"
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span className="w-5 h-5 rounded bg-[#D4AF37]/15 text-[#D4AF37] font-mono font-bold text-[11px] flex items-center justify-center shrink-0">
+                                        {it.qty}
+                                      </span>
+                                      <span className="font-semibold text-zinc-200 truncate">
+                                        {it.name}
+                                      </span>
+                                    </div>
+                                    <span className="font-mono text-[#A1A1AA] text-xs shrink-0 ml-2">
+                                      ₹{it.price * it.qty}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+
+                              {/* Special Instructions Note */}
+                              {(order.notes || order.note) && (
+                                <div className="mt-3 p-2.5 rounded-xl bg-[#0B0B0F] border border-zinc-800 text-[11px] text-[#D4AF37]">
+                                  <span className="font-bold text-[10px] text-[#A1A1AA] uppercase tracking-wider block">
+                                    Customer Note:
+                                  </span>
+                                  "{order.notes || order.note}"
+                                </div>
+                              )}
+
+                              {/* Total Amount in footer */}
+                              <div className="pt-2 border-t border-zinc-800 flex justify-between items-center text-xs">
+                                <span className="text-zinc-400">Total Bill</span>
+                                <span className="font-mono font-bold text-sm text-white">
+                                  ₹{order.total}
                                 </span>
                               </div>
-                            ))}
+                            </div>
+
+                            {/* ONE-TAP STATUS ACTION BUTTONS */}
+                            <div className="p-3 bg-[#0B0B0F] border-t border-zinc-800 flex items-center gap-2">
+                              {order.status === 'received' && (
+                                <button
+                                  onClick={() => handleStatusChange(order.id, 'preparing')}
+                                  className="flex-1 py-2.5 rounded-xl bg-[#2563EB] hover:bg-blue-600 font-bold text-xs text-white shadow-md transition-all flex items-center justify-center gap-2 min-h-[40px]"
+                                >
+                                  <ChefHat className="w-4 h-4" />
+                                  <span>Start Preparing</span>
+                                </button>
+                              )}
+
+                              {order.status === 'preparing' && (
+                                <button
+                                  onClick={() => handleStatusChange(order.id, 'ready')}
+                                  className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-[#D4AF37] to-amber-500 hover:from-amber-400 hover:to-amber-500 font-bold text-xs text-zinc-950 shadow-md transition-all flex items-center justify-center gap-2 min-h-[40px]"
+                                >
+                                  <Bike className="w-4 h-4" />
+                                  <span>Mark Ready & Out</span>
+                                </button>
+                              )}
+
+                              {(order.status === 'ready' || order.status === 'on_the_way') && (
+                                <button
+                                  onClick={() => handleStatusChange(order.id, 'delivered')}
+                                  className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-bold text-xs text-white shadow-md transition-all flex items-center justify-center gap-2 min-h-[40px]"
+                                >
+                                  <CheckCircle2 className="w-4 h-4" />
+                                  <span>Delivered to Seat {seatLabel}</span>
+                                </button>
+                              )}
+
+                              {order.status === 'delivered' && (
+                                <div className="flex-1 py-2 text-center text-xs text-emerald-400 font-semibold flex items-center justify-center gap-1.5">
+                                  <CheckCircle2 className="w-4 h-4" />
+                                  <span>Delivered to Patron</span>
+                                </div>
+                              )}
+
+                              {order.status === 'cancelled' && (
+                                <div className="flex-1 py-2 text-center text-xs text-rose-400 font-semibold flex items-center justify-center gap-1.5">
+                                  <Ban className="w-4 h-4" />
+                                  <span>Cancelled Order</span>
+                                </div>
+                              )}
+
+                              {/* Cancel order button if not already delivered or cancelled */}
+                              {order.status !== 'delivered' && order.status !== 'cancelled' && (
+                                <button
+                                  onClick={() => {
+                                    if (confirm(`Cancel order for Seat ${seatLabel}?`)) {
+                                      handleStatusChange(order.id, 'cancelled');
+                                    }
+                                  }}
+                                  title="Cancel Order"
+                                  className="px-2.5 py-2.5 rounded-xl bg-zinc-900 hover:bg-rose-950/50 border border-zinc-800 text-zinc-400 hover:text-rose-400 transition-colors"
+                                >
+                                  <Ban className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
                           </div>
-
-                          {/* Special Instructions Note */}
-                          {(order.notes || order.note) && (
-                            <div className="mt-3 p-2.5 rounded-xl bg-[#0B0B0F] border border-zinc-800 text-[11px] text-[#D4AF37]">
-                              <span className="font-bold text-[10px] text-[#A1A1AA] uppercase tracking-wider block">
-                                Customer Note:
-                              </span>
-                              "{order.notes || order.note}"
-                            </div>
-                          )}
-                        </div>
-
-                        {/* ONE-TAP STATUS ACTION BUTTONS */}
-                        <div className="p-3 bg-[#0B0B0F] border-t border-zinc-800">
-                          {order.status === 'received' && (
-                            <button
-                              onClick={() => handleStatusChange(order.id, 'preparing')}
-                              className="w-full py-2.5 rounded-xl bg-[#2563EB] hover:bg-blue-600 font-bold text-xs text-white shadow-md transition-all flex items-center justify-center gap-2 min-h-[40px]"
-                            >
-                              <ChefHat className="w-4 h-4" />
-                              <span>Start Preparing</span>
-                            </button>
-                          )}
-
-                          {order.status === 'preparing' && (
-                            <button
-                              onClick={() => handleStatusChange(order.id, 'on_the_way')}
-                              className="w-full py-2.5 rounded-xl bg-gradient-to-r from-[#D4AF37] to-amber-500 hover:from-amber-400 hover:to-amber-500 font-bold text-xs text-zinc-950 shadow-md transition-all flex items-center justify-center gap-2 min-h-[40px]"
-                            >
-                              <Bike className="w-4 h-4" />
-                              <span>Out for Delivery</span>
-                            </button>
-                          )}
-
-                          {order.status === 'on_the_way' && (
-                            <button
-                              onClick={() => handleStatusChange(order.id, 'delivered')}
-                              className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-bold text-xs text-white shadow-md transition-all flex items-center justify-center gap-2 min-h-[40px]"
-                            >
-                              <CheckCircle2 className="w-4 h-4" />
-                              <span>Delivered to Seat {seatLabel}</span>
-                            </button>
-                          )}
-
-                          {order.status === 'delivered' && (
-                            <div className="py-2 text-center text-xs text-emerald-400 font-semibold flex items-center justify-center gap-1.5">
-                              <CheckCircle2 className="w-4 h-4" />
-                              <span>Delivered to Patron</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
-          )}
 
           {/* RIGHT: LIVE SEAT MAP (draws cinema grid colored by order status) */}
           {(layoutMode === 'split' || layoutMode === 'map') && (
