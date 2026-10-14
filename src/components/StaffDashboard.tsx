@@ -98,42 +98,7 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
   const [tickets, setTickets] = useState<Ticket[]>(() => storeService.getTickets());
   const [staffTab, setStaffTab] = useState<'orders' | 'tickets'>('orders');
 
-  // Demo simulation state
-  const [isSimulating, setIsSimulating] = useState(false);
-  const [isClearingDemo, setIsClearingDemo] = useState(false);
-  const [dashboardToast, setDashboardToast] = useState<string | null>(null);
 
-  const handleSimulateOrder = async () => {
-    setIsSimulating(true);
-    try {
-      const newOrd = await storeService.simulateDemoOrder();
-      soundService.playNewOrderSound();
-      setHighlightOrderId(newOrd.id);
-      setDashboardToast(`Order sent: Screen ${newOrd.screen}, Row ${newOrd.row}, Seat ${newOrd.seat} (₹${newOrd.total})`);
-      setTimeout(() => setDashboardToast(null), 4500);
-    } catch (err) {
-      console.error('Simulation error:', err);
-      setDashboardToast('Failed to simulate demo order.');
-      setTimeout(() => setDashboardToast(null), 3500);
-    } finally {
-      setIsSimulating(false);
-    }
-  };
-
-  const handleClearDemoOrders = async () => {
-    setIsClearingDemo(true);
-    try {
-      const res = await storeService.clearDemoOrders();
-      setDashboardToast(`Cleared ${res.deletedCount} demo orders.`);
-      setTimeout(() => setDashboardToast(null), 4000);
-    } catch (err) {
-      console.error('Clear demo orders error:', err);
-      setDashboardToast('Failed to clear demo orders.');
-      setTimeout(() => setDashboardToast(null), 3500);
-    } finally {
-      setIsClearingDemo(false);
-    }
-  };
 
   useEffect(() => {
     const unsub = storeService.subscribeScreens((sc) => setScreensMap(sc));
@@ -420,35 +385,7 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
 
           {/* Action buttons: Simulate Demo Order, Clear Demo Orders, Manual Order, Sound Test, View Mode, Logout */}
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={handleSimulateOrder}
-              disabled={isSimulating}
-              title="Create a realistic random demo order in Firestore"
-              className="px-3.5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-[#D4AF37] hover:from-amber-400 hover:to-yellow-400 text-black font-extrabold text-xs shadow-md shadow-amber-500/20 transition-all flex items-center gap-1.5 min-h-[40px] disabled:opacity-60"
-            >
-              {isSimulating ? (
-                <Loader2 className="w-4 h-4 animate-spin text-black" />
-              ) : (
-                <Sparkles className="w-4 h-4 text-black" />
-              )}
-              <span>{isSimulating ? 'Sending...' : 'Simulate order'}</span>
-            </button>
 
-            {orders.some((o) => o.isDemo) && (
-              <button
-                onClick={handleClearDemoOrders}
-                disabled={isClearingDemo}
-                title="Delete orders created by Simulate"
-                className="px-3 py-2.5 rounded-xl bg-zinc-850 hover:bg-rose-950/60 text-zinc-300 hover:text-rose-300 border border-zinc-700 hover:border-rose-700/50 font-bold text-xs transition-all flex items-center gap-1.5 min-h-[40px] disabled:opacity-60"
-              >
-                {isClearingDemo ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-400" />
-                ) : (
-                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                )}
-                <span>Clear demo orders</span>
-              </button>
-            )}
 
             <button
               onClick={() => setIsManualOrderOpen(true)}
@@ -507,21 +444,7 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
           </div>
         </div>
 
-        {/* Live Feedback Toast Notification */}
-        {dashboardToast && (
-          <div className="p-3.5 rounded-2xl bg-gradient-to-r from-zinc-900 via-[#15151C] to-zinc-900 border border-[#D4AF37]/40 text-white text-xs flex items-center justify-between shadow-xl animate-fade-in">
-            <div className="flex items-center gap-2.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
-              <span className="font-semibold text-zinc-100">{dashboardToast}</span>
-            </div>
-            <button
-              onClick={() => setDashboardToast(null)}
-              className="text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-zinc-800 transition-colors"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        )}
+
 
         {/* Counter Navigation Tabs: Orders vs Tickets with red badge */}
         <div className="flex items-center gap-2 bg-[#15151C] border border-zinc-800 p-1.5 rounded-2xl w-fit">

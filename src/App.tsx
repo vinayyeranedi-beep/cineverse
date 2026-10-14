@@ -7,7 +7,6 @@ import { StaffLoginModal } from './components/StaffLoginModal';
 import { ReportIssueModal } from './components/ReportIssueModal';
 import { QRTestModal } from './components/QRTestModal';
 import { CineverseSplash } from './components/CineverseSplash';
-import { BrandLogoModal } from './components/BrandLogoModal';
 import { CartProvider } from './context/CartContext';
 import { storeService, sanitizeMenuItems } from './services/store';
 import { MenuItem, Order, UserProfile, ActiveTab, Ticket, IssueType } from './types';
@@ -73,8 +72,6 @@ export default function App() {
   // QR Test & Seat Simulator Modal state
   const [isQRTestModalOpen, setIsQRTestModalOpen] = useState(false);
 
-  // Brand Logo Customizer Modal state
-  const [isLogoModalOpen, setIsLogoModalOpen] = useState(false);
 
   // Issue Reporting Modal state
   const [isReportIssueModalOpen, setIsReportIssueModalOpen] = useState(false);
@@ -294,6 +291,13 @@ export default function App() {
     };
   }, []);
 
+  // Customers: sign in silently with Firebase Anonymous Authentication when they open the order page (no visible login)
+  useEffect(() => {
+    if (!currentUser || currentUser.role === 'customer') {
+      storeService.ensureCustomerAnonymousAuth().catch(() => {});
+    }
+  }, [currentUser]);
+
   // Switch tab and sync url path with security checks
   const handleTabChange = (tab: ActiveTab) => {
     if (tab === 'counter') {
@@ -371,7 +375,6 @@ export default function App() {
           onOpenStaffLogin={() => setIsStaffLoginModalOpen(true)}
           onOpenReportIssue={() => handleOpenReportIssue()}
           onOpenQRTest={() => setIsQRTestModalOpen(true)}
-          onOpenLogoCustomizer={() => setIsLogoModalOpen(true)}
           activeOrderCount={activeOrdersCount}
           openTicketsCount={openTicketsCount}
         />
@@ -459,11 +462,7 @@ export default function App() {
           }}
         />
 
-        {/* Cinema Brand & Logo Customizer Modal */}
-        <BrandLogoModal
-          isOpen={isLogoModalOpen}
-          onClose={() => setIsLogoModalOpen(false)}
-        />
+
       </div>
     </CartProvider>
   );

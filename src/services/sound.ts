@@ -122,8 +122,41 @@ class SoundService {
         osc.start(now + i * 0.1);
         osc.stop(now + i * 0.1 + 0.4);
       });
-    } catch (e) {
-      console.warn('Audio play prevented or unsupported', e);
+    } catch {
+      // Audio playback error handled gracefully
+    }
+  }
+
+  /**
+   * Cinematic deep golden intro chord for the 2-second website visit intro
+   */
+  public playCinemaIntroSound() {
+    if (!this.soundEnabled) return;
+    try {
+      const ctx = this.getContext();
+      if (!ctx) return;
+
+      const now = ctx.currentTime;
+      // Warm chord: D3 (146.83Hz), A3 (220.00Hz), D4 (293.66Hz), F#4 (369.99Hz)
+      const frequencies = [146.83, 220.0, 293.66, 369.99];
+
+      frequencies.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = idx === 0 ? 'sine' : 'triangle';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+
+        gain.gain.setValueAtTime(0.001, now);
+        gain.gain.exponentialRampToValueAtTime(0.08, now + 0.2);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.8);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 1.9);
+      });
+    } catch {
+      // Audio autoplay policy handled silently
     }
   }
 }

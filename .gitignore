@@ -1,8 +1,19 @@
-node_modules/
-build/
-dist/
-coverage/
+# Dependencies
+node_modules
+
+# Production builds
+dist
+build
+
+# Environment files
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Firebase service account credentials
+serviceAccount*.json
+
+# Misc
 .DS_Store
 *.log
-.env*
-!.env.example

@@ -1,6 +1,4 @@
-import React, { useEffect, useState } from 'react';
-import { storeService } from '../services/store';
-import { CinemaBranding } from '../types';
+import React from 'react';
 
 interface CineverseLogoProps {
   className?: string;
@@ -8,33 +6,17 @@ interface CineverseLogoProps {
   showSubtitle?: boolean;
   subtitle?: string;
   layout?: 'horizontal' | 'vertical' | 'icon-only';
-  customLogoUrl?: string | null;
-  customName?: string;
 }
 
 export const CineverseLogo: React.FC<CineverseLogoProps> = ({
   className = '',
   size = 'md',
   showSubtitle = true,
-  subtitle,
+  subtitle = 'MULTIPLEX',
   layout = 'horizontal',
-  customLogoUrl,
-  customName,
 }) => {
-  const [branding, setBranding] = useState<CinemaBranding>(() => storeService.getCinemaBranding());
-  const [imgError, setImgError] = useState(false);
-
-  useEffect(() => {
-    const unsub = storeService.subscribeBranding((b) => {
-      setBranding(b);
-      setImgError(false);
-    });
-    return unsub;
-  }, []);
-
-  const activeLogoUrl = customLogoUrl !== undefined ? customLogoUrl : branding.logoUrl;
-  const displayName = customName || branding.name || 'Cineverse';
-  const displaySubtitle = subtitle || branding.subtitle || 'MULTIPLEX';
+  const displayName = 'Cineverse';
+  const displaySubtitle = subtitle;
 
   const iconSizes = {
     xs: 'w-6 h-6',
@@ -72,23 +54,15 @@ export const CineverseLogo: React.FC<CineverseLogoProps> = ({
         isVertical ? 'flex-col items-center text-center gap-3' : 'items-center gap-3'
       } ${className}`}
     >
-      {/* Logo Emblem: User's Custom Image or Official Vector Cinema Projector */}
+      {/* Fixed Official Cineverse Vector Projector Emblem */}
       <div
         className={`${iconSizes[size]} relative rounded-2xl bg-[#15151C] border border-[#D4AF37]/60 flex items-center justify-center text-[#D4AF37] shadow-[0_0_24px_rgba(212,175,55,0.3)] shrink-0 p-1 sm:p-1.5 overflow-hidden group-hover:border-[#D4AF37] transition-all`}
       >
-        {activeLogoUrl && !imgError ? (
-          <img
-            src={activeLogoUrl}
-            alt={displayName}
-            className="w-full h-full object-contain"
-            onError={() => setImgError(true)}
-          />
-        ) : (
-          <svg
-            viewBox="0 0 120 120"
-            className="w-full h-full"
-            xmlns="http://www.w3.org/2000/svg"
-          >
+        <svg
+          viewBox="0 0 120 120"
+          className="w-full h-full"
+          xmlns="http://www.w3.org/2000/svg"
+        >
             <defs>
               {/* Metallic Gold Gradient */}
               <linearGradient id="cvLogoGold" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -156,7 +130,6 @@ export const CineverseLogo: React.FC<CineverseLogoProps> = ({
             <polygon points="98,54 113,46 113,76 98,68" fill="url(#cvLogoGold)" />
             <polygon points="113,48 119,45 119,77 113,74" fill="url(#cvLogoBeam)" />
           </svg>
-        )}
       </div>
 
       {!isIconOnly && (

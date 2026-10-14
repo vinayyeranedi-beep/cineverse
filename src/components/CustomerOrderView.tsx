@@ -82,9 +82,6 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
 
   const cartTotal = calculateTotal(menuItems);
 
-  // Maximum allowed orders per movie session for this seat
-  const MAX_ORDERS_PER_SEAT = 5;
-
   // Animation triggers when cart items increase
   const prevCountRef = useRef(totalItemsCount);
   const [countBounceKey, setCountBounceKey] = useState(0);
@@ -115,21 +112,18 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
     }
   });
 
+  // Track orders placed in this session, plus any active undelivered orders for this seat
   const seatOrders = orders.filter((o: Order) => {
     const isSameSeat =
       String(o.screen) === String(screen) &&
       o.row.toUpperCase() === row.toUpperCase() &&
       o.seat.replace(/^[A-Za-z]+/, '') === cleanSeatNum;
     const isSessionOrder = sessionOrderIds.includes(o.id) || sessionOrderIds.includes(o.orderId || '');
-    return isSameSeat || isSessionOrder;
+    return isSessionOrder || (isSameSeat && o.status !== 'delivered');
   });
 
   const activeSeatOrders = seatOrders.filter((o: Order) => o.status !== 'delivered');
   const pastSeatOrders = seatOrders.filter((o: Order) => o.status === 'delivered');
-
-  // Customer can order up to 5 times per movie session!
-  const currentRound = seatOrders.length + 1;
-  const canOrderMore = seatOrders.length < MAX_ORDERS_PER_SEAT;
 
   // Selected order tab for multi-order live tracking
   const [selectedActiveOrderId, setSelectedActiveOrderId] = useState<string | null>(null);
@@ -183,14 +177,6 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
     if (totalItemsCount === 0 || isSubmitting) return;
     setOrderError('');
 
-    // Check maximum orders limit
-    if (!canOrderMore) {
-      setOrderError(
-        `You have reached the maximum limit of ${MAX_ORDERS_PER_SEAT} orders for this movie session. Please contact cinema staff for assistance.`
-      );
-      return;
-    }
-
     // 1. Block ordering if seat is missing or invalid
     if (!screen || !row || !cleanSeatNum) {
       setOrderError('Seat information is missing from this QR scan. Please report this issue to cinema staff.');
@@ -203,7 +189,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
       return;
     }
 
-    // 3. Block out-of-stock items
+    // 2. Block out-of-stock items
     for (const [itemId, qty] of Object.entries(cart)) {
       if (qty > 0) {
         const item = menuItems.find((m) => m.id === itemId);
@@ -235,10 +221,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
         seat: cleanSeatNum,
         items: orderItems,
         total: cartTotal,
-        notes: customerNotes.trim()
-          ? `[Round ${currentRound}] ${customerNotes.trim()}`
-          : `Round ${currentRound}`,
-        round: currentRound,
+        notes: customerNotes.trim(),
       });
 
       // Remember order in session storage
@@ -258,7 +241,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
       soundService.playNewOrderSound();
 
       setToastMessage(
-        `Order #${placed.orderId || placed.id.substring(0, 6)} (Round ${currentRound}) placed for Seat ${cleanSeatLabel}!`
+        `Order #${placed.orderId || placed.id.substring(0, 6)} placed for Seat ${cleanSeatLabel}!`
       );
       setTimeout(() => setToastMessage(null), 5000);
     } catch (err: unknown) {
@@ -365,15 +348,15 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
       </section>
 
       <div className="max-w-4xl mx-auto px-4 pt-4">
-        {/* MULTI-ORDER ROUND NOTICE (If seat has placed an order and can order more) */}
-        {seatOrders.length > 0 && canOrderMore && (
+        {/* MULTI-ORDER NOTICE (If seat has active kitchen orders) */}
+        {activeSeatOrders.length > 0 && (
           <div className="mb-4 p-3 rounded-xl bg-[#D4AF37]/10 border border-[#D4AF37]/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
             <div className="flex items-center gap-2">
               <span className="px-2 py-0.5 rounded-md bg-[#D4AF37] text-black font-extrabold text-[11px] uppercase tracking-wider">
-                Round {currentRound} of {MAX_ORDERS_PER_SEAT}
+                Kitchen Active
               </span>
               <span className="text-zinc-300">
-                You can order up to {MAX_ORDERS_PER_SEAT} times during your movie! Add more popcorn or soft drinks anytime.
+                Order anytime! You can place additional orders whenever you want during the movie.
               </span>
             </div>
             <span className="text-[#D4AF37] font-semibold text-[11px] shrink-0">
@@ -397,9 +380,8 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
                 <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider shrink-0">
                   Active Orders:
                 </span>
-                {activeSeatOrders.map((ord, idx) => {
+                {activeSeatOrders.map((ord) => {
                   const isSelected = ord.id === currentTrackedOrder.id;
-                  const roundNum = ord.round || idx + 1;
                   return (
                     <button
                       key={ord.id}
@@ -410,8 +392,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
                           : 'bg-zinc-800/80 text-zinc-400 hover:text-white hover:bg-zinc-700'
                       }`}
                     >
-                      <span>Round {roundNum}</span>
-                      <span className="text-[10px] opacity-80">#{ord.orderId || ord.id.substring(0, 5)}</span>
+                      <span>Order #{ord.orderId || ord.id.substring(0, 5)}</span>
                       <span
                         className={`w-2 h-2 rounded-full ${
                           ord.status === 'delivered'
@@ -440,11 +421,6 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
                     <h3 className="font-bold text-white text-base">
                       Active Order #{currentTrackedOrder.orderId || currentTrackedOrder.id.substring(0, 7)}
                     </h3>
-                    {currentTrackedOrder.round && (
-                      <span className="px-2 py-0.5 rounded-full bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/40 text-[10px] font-bold">
-                        Round {currentTrackedOrder.round} of {MAX_ORDERS_PER_SEAT}
-                      </span>
-                    )}
                     {currentTrackedOrder.isDemo && (
                       <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                         Demo data
@@ -691,13 +667,8 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
                           /* Add Button */
                           <button
                             onClick={() => addItem(item)}
-                            disabled={!canOrderMore}
-                            title={!canOrderMore ? `Maximum ${MAX_ORDERS_PER_SEAT} orders reached` : 'Add to cinema cart'}
-                            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 min-h-[44px] min-w-[76px] justify-center ${
-                              !canOrderMore
-                                ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
-                                : 'bg-[#E50914] hover:bg-[#c80812] text-white shadow-md shadow-[#E50914]/25 active:scale-95'
-                            }`}
+                            title="Add to cinema cart"
+                            className="px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 min-h-[44px] min-w-[76px] justify-center bg-[#E50914] hover:bg-[#c80812] text-white shadow-md shadow-[#E50914]/25 active:scale-95"
                           >
                             <Plus className="w-4 h-4 stroke-[3]" />
                             <span>Add</span>

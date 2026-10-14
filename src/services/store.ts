@@ -15,6 +15,7 @@ import {
 import {
   getAuth,
   signInWithEmailAndPassword,
+  signInAnonymously,
   signOut,
   onAuthStateChanged,
   User as FirebaseUser,
@@ -249,13 +250,13 @@ export interface FirebaseConfigType {
 
 // Built-in provisioned Firebase configuration for cross-device real-time sync
 export const DEFAULT_FIREBASE_CONFIG: FirebaseConfigType = {
-  projectId: 'cryptic-dynamo-h6rpq',
-  appId: '1:74019311671:web:21e5939937a35b35a3efb2',
-  apiKey: 'AIzaSyChVEkUawOQp9UMj4LOD9C9yggg0Ju5DTU',
-  authDomain: 'cryptic-dynamo-h6rpq.firebaseapp.com',
-  firestoreDatabaseId: 'ai-studio-seatbitecinemaqr-82234bbb-a8e9-4f29-83d0-2c863e1bb94b',
-  storageBucket: 'cryptic-dynamo-h6rpq.firebasestorage.app',
-  messagingSenderId: '74019311671',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || '',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
+  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || '',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
 };
 
 class StoreService {
@@ -527,22 +528,42 @@ class StoreService {
 
       onAuthStateChanged(this.auth, (fbUser: FirebaseUser | null) => {
         if (fbUser) {
-          const profile: UserProfile = {
-            uid: fbUser.uid,
-            email: fbUser.email || 'staff@seatserve.cinema',
-            role: fbUser.email?.includes('admin') ? 'admin' : 'staff',
-            name: fbUser.displayName || fbUser.email?.split('@')[0] || 'Staff Member',
-          };
-          this.currentUser = profile;
+          if (fbUser.isAnonymous) {
+            // Customer signed in silently via Anonymous Auth
+            const profile: UserProfile = {
+              uid: fbUser.uid,
+              role: 'customer',
+              name: 'Guest Moviegoer',
+            };
+            this.currentUser = profile;
+          } else {
+            const cleanEmail = (fbUser.email || '').toLowerCase();
+            const isAdmin =
+              cleanEmail.includes('admin') ||
+              cleanEmail === 'admin@cineverse.com' ||
+              cleanEmail === 'admin@seatserve.cinema' ||
+              cleanEmail === 'admin@seatbite.cinema';
+            const role: 'admin' | 'staff' = isAdmin ? 'admin' : 'staff';
+            const profile: UserProfile = {
+              uid: fbUser.uid,
+              email: fbUser.email || (role === 'admin' ? 'admin@cineverse.com' : 'staff@cineverse.com'),
+              role,
+              name: fbUser.displayName || fbUser.email?.split('@')[0] || (role === 'admin' ? 'Cinema Administrator' : 'Staff Member'),
+            };
+            this.currentUser = profile;
+          }
         } else {
           // If not logged into Firebase Auth, preserve locally logged-in staff
           const savedUser = localStorage.getItem(STORAGE_KEY_CURRENT_USER);
           if (savedUser) {
             try {
-              this.currentUser = JSON.parse(savedUser);
+              const u = JSON.parse(savedUser);
+              this.currentUser = u && (u.role === 'staff' || u.role === 'admin') ? u : null;
             } catch {
               this.currentUser = null;
             }
+          } else {
+            this.currentUser = null;
           }
         }
         this.notifyAuthListeners();
@@ -598,15 +619,12 @@ class StoreService {
         }
       );
 
-      // Menu: Auto-loads sample menu if menuItems collection is empty
+      // Menu: Real-time sync with Firestore
       const menuRef = collection(this.db, 'menuItems');
       this.unsubscribeFirestoreMenu = onSnapshot(
         menuRef,
-        async (snapshot) => {
-          if (snapshot.empty) {
-            console.log('Firestore menuItems collection is empty. Auto-loading sample demo menu...');
-            await this.loadSampleMenu(true);
-          } else {
+        (snapshot) => {
+          if (!snapshot.empty) {
             const list: MenuItem[] = [];
             snapshot.forEach((d) => {
               const data = d.data();
@@ -638,11 +656,8 @@ class StoreService {
       const screensRef = collection(this.db, 'screens');
       this.unsubscribeFirestoreScreens = onSnapshot(
         screensRef,
-        async (snapshot) => {
-          if (snapshot.empty) {
-            console.log('Firestore screens collection is empty. Initializing 3 demo screen layouts...');
-            await this.ensureScreensDemoLayout();
-          } else {
+        (snapshot) => {
+          if (!snapshot.empty) {
             const map: Record<string, ScreenGridConfig> = {};
             snapshot.forEach((d) => {
               const data = d.data();
@@ -717,6 +732,28 @@ class StoreService {
       this.syncFromLocalStorage();
     } else {
       this.checkAndInitFirebase();
+    }
+  }
+
+  /**
+   * Customers: sign in silently with Firebase Anonymous Authentication when
+   * they open the order page (no visible login).
+   */
+  public async ensureCustomerAnonymousAuth(): Promise<FirebaseUser | null> {
+    if (!this.auth) {
+      this.checkAndInitFirebase();
+    }
+    if (!this.auth) return null;
+
+    try {
+      if (this.auth.currentUser) {
+        return this.auth.currentUser;
+      }
+      const cred = await signInAnonymously(this.auth);
+      return cred.user;
+    } catch (err) {
+      console.warn('Silent customer anonymous auth skipped/failed:', err);
+      return null;
     }
   }
 

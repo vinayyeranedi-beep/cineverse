@@ -63,8 +63,8 @@ export interface StaffAccount {
 
 export interface UserProfile {
   uid: string;
-  email: string;
-  role: 'staff' | 'admin';
+  email?: string;
+  role: 'customer' | 'staff' | 'admin';
   name?: string;
 }
 
