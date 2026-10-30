@@ -33,8 +33,14 @@ import {
   TicketStatus,
   IssueType,
   CinemaBranding,
+  SeatMapConfig,
+  LayoutSummaryItem,
 } from '../types';
 import { INITIAL_MENU_ITEMS } from '../data/sampleMenu';
+import {
+  createDefaultSeatMap,
+  createSummaryLayout,
+} from '../lib/seatMapDefaults';
 import {
   startOfDay,
   endOfDay,
@@ -175,16 +181,22 @@ export function calculateCinemaLayout(totalSeats: number, customPerRow?: number)
 // Screen 1: 200 seats (10 rows A-J x 20 seats per row)
 // Screen 2: 290 seats (15 rows A-O x 20 seats per row, row O has 10 seats = 290)
 // Screen 3: 250 seats (13 rows A-M x 20 seats per row, row M has 10 seats = 250)
+const defaultSeatMap1 = createDefaultSeatMap('1');
+const defaultSeatMap2 = createDefaultSeatMap('2');
+const defaultSeatMap3 = createDefaultSeatMap('3');
+
 export const DEMO_SCREENS: Record<string, ScreenGridConfig> = {
   '1': {
     id: 'screen-1',
     name: 'Audi 1 (IMAX)',
     screenNumber: '1',
     rowsCount: 10, // Rows A through J (10 rows)
-    seatsPerRow: 20, // 20 seats per row = 200 seats
+    seatsPerRow: 20, // 20 seats per row
     rowOverrides: {},
     aisleGaps: [6, 14], // Aisle passage after seat 6 and 14
     disabledSeats: [],
+    seatMap: defaultSeatMap1,
+    layout: createSummaryLayout(defaultSeatMap1),
     updatedAt: Date.now(),
   },
   '2': {
@@ -192,12 +204,14 @@ export const DEMO_SCREENS: Record<string, ScreenGridConfig> = {
     name: 'Audi 2 (Dolby Atmos)',
     screenNumber: '2',
     rowsCount: 15, // Rows A through O (15 rows)
-    seatsPerRow: 20, // 14 rows * 20 = 280, Row O = 10 seats -> 290 seats
+    seatsPerRow: 20,
     rowOverrides: {
       O: 10,
     },
     aisleGaps: [6, 14],
     disabledSeats: [],
+    seatMap: defaultSeatMap2,
+    layout: createSummaryLayout(defaultSeatMap2),
     updatedAt: Date.now(),
   },
   '3': {
@@ -205,12 +219,14 @@ export const DEMO_SCREENS: Record<string, ScreenGridConfig> = {
     name: 'Audi 3 (Gold Class)',
     screenNumber: '3',
     rowsCount: 13, // Rows A through M (13 rows)
-    seatsPerRow: 20, // 12 rows * 20 = 240, Row M = 10 seats -> 250 seats
+    seatsPerRow: 20,
     rowOverrides: {
       M: 10,
     },
     aisleGaps: [6, 14],
     disabledSeats: [],
+    seatMap: defaultSeatMap3,
+    layout: createSummaryLayout(defaultSeatMap3),
     updatedAt: Date.now(),
   },
 };
@@ -260,13 +276,15 @@ export interface FirebaseConfigType {
 
 // Built-in provisioned Firebase configuration for cross-device real-time sync
 export const DEFAULT_FIREBASE_CONFIG: FirebaseConfigType = {
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || '',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
-  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || '',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'cryptic-dynamo-h6rpq',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:74019311671:web:21e5939937a35b35a3efb2',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyChVEkUawOQp9UMj4LOD9C9yggg0Ju5DTU',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'cryptic-dynamo-h6rpq.firebaseapp.com',
+  firestoreDatabaseId:
+    import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID ||
+    'ai-studio-seatbitecinemaqr-82234bbb-a8e9-4f29-83d0-2c863e1bb94b',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'cryptic-dynamo-h6rpq.firebasestorage.app',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '74019311671',
 };
 
 class StoreService {
@@ -347,7 +365,21 @@ class StoreService {
       // Screens
       const savedScreens = localStorage.getItem(STORAGE_KEY_SCREENS);
       if (savedScreens) {
-        this.screens = JSON.parse(savedScreens);
+        try {
+          const parsed = JSON.parse(savedScreens);
+          const normalized: Record<string, ScreenGridConfig> = {};
+          for (const [k, v] of Object.entries(parsed as Record<string, ScreenGridConfig>)) {
+            const sm = v.seatMap || createDefaultSeatMap(k);
+            normalized[k] = {
+              ...v,
+              seatMap: sm,
+              layout: v.layout || createSummaryLayout(sm),
+            };
+          }
+          this.screens = normalized;
+        } catch {
+          this.screens = { ...INITIAL_SCREENS };
+        }
       } else {
         this.screens = { ...INITIAL_SCREENS };
         localStorage.setItem(STORAGE_KEY_SCREENS, JSON.stringify(this.screens));
@@ -656,15 +688,19 @@ class StoreService {
             snapshot.forEach((d) => {
               const data = d.data();
               const scr = String(data.screenNumber || data.screen || d.id.replace('screen', ''));
+              const seatMap = data.seatMap || this.screens[scr]?.seatMap || createDefaultSeatMap(scr);
               map[scr] = {
                 id: d.id,
                 name: data.name || `Screen ${scr}`,
                 screenNumber: scr,
-                rowsCount: Number(data.rowsCount) || 14,
+                rowsCount: Number(data.rowsCount) || (seatMap ? seatMap.rows.length : 14),
                 seatsPerRow: Number(data.seatsPerRow) || 20,
                 rowOverrides: data.rowOverrides || {},
                 aisleGaps: data.aisleGaps || [],
                 disabledSeats: data.disabledSeats || [],
+                seatMap,
+                layout: data.layout || (seatMap ? createSummaryLayout(seatMap) : undefined),
+                seatMapHistory: data.seatMapHistory || [],
                 updatedAt: data.updatedAt ? Number(data.updatedAt) : undefined,
               };
             });
@@ -768,6 +804,10 @@ class StoreService {
     };
   }
 
+  public getOrders(): Order[] {
+    return [...this.orders];
+  }
+
   /**
    * Helper to map raw Firestore / local data to Order interface with all canonical fields
    */
@@ -789,9 +829,27 @@ class StoreService {
       paidAt: data.paidAt ? Number(data.paidAt) : undefined,
       round: data.round ? Number(data.round) : 1,
       isDemo: Boolean(data.isDemo),
+      isTest: Boolean(data.isTest),
+      userId: data.userId || undefined,
       createdAt: Number(data.createdAt) || Date.now(),
       updatedAt: data.updatedAt ? Number(data.updatedAt) : undefined,
     };
+  }
+
+  public getDb(): ReturnType<typeof getFirestore> | null {
+    return this.db;
+  }
+
+  public getAuthInstance(): ReturnType<typeof getAuth> | null {
+    return this.auth;
+  }
+
+  public clearLocalTestOrders(): number {
+    const prevCount = this.orders.length;
+    this.orders = this.orders.filter((o) => !o.isTest);
+    localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify(this.orders));
+    this.notifyOrderListeners();
+    return prevCount - this.orders.length;
   }
 
   /**
@@ -814,15 +872,28 @@ class StoreService {
         .sort((a, b) => b.createdAt - a.createdAt);
     };
 
+    let remoteOrders: Order[] = [];
+
+    const emitMergedOrders = () => {
+      const map = new Map<string, Order>();
+      // Put local in-memory orders
+      getLocalDayOrders().forEach((o) => map.set(o.id || o.orderId || String(o.createdAt), o));
+      // Put remote Firestore orders (authoritative)
+      remoteOrders.forEach((o) => map.set(o.id || o.orderId || String(o.createdAt), o));
+      const merged = Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
+      callback(merged);
+    };
+
     // Immediate callback with cached local orders for snappy UI
-    callback(getLocalDayOrders());
+    emitMergedOrders();
+
+    // Listen to local store updates (from placeOrder, BroadcastChannel, optimistic mutations)
+    const unsubLocal = this.subscribeOrders(() => {
+      emitMergedOrders();
+    });
 
     if (!this.db) {
-      // Local fallback
-      const unsub = this.subscribeOrders(() => {
-        callback(getLocalDayOrders());
-      });
-      return unsub;
+      return unsubLocal;
     }
 
     try {
@@ -836,21 +907,26 @@ class StoreService {
 
       if (isCurrentDay) {
         // Real-time listener when "Today" is selected
-        const unsubscribe = onSnapshot(
+        const unsubFirestore = onSnapshot(
           q,
           (snapshot) => {
             const list: Order[] = [];
             snapshot.forEach((d) => {
               list.push(this.mapFirestoreOrder(d.id, d.data()));
             });
-            callback(list);
+            remoteOrders = list;
+            emitMergedOrders();
           },
           (err) => {
             console.warn('Firestore day orders listener error, using local fallback:', err);
-            callback(getLocalDayOrders());
+            emitMergedOrders();
           }
         );
-        return unsubscribe;
+
+        return () => {
+          unsubLocal();
+          unsubFirestore();
+        };
       } else {
         // Normal one-time fetch for past days
         getDocs(q)
@@ -859,18 +935,19 @@ class StoreService {
             snapshot.forEach((d) => {
               list.push(this.mapFirestoreOrder(d.id, d.data()));
             });
-            callback(list);
+            remoteOrders = list;
+            emitMergedOrders();
           })
           .catch((err) => {
             console.warn('Firestore past day fetch error, using local fallback:', err);
-            callback(getLocalDayOrders());
+            emitMergedOrders();
           });
 
-        return () => {};
+        return unsubLocal;
       }
     } catch (e) {
       console.warn('Error setting up day orders query:', e);
-      return () => {};
+      return unsubLocal;
     }
   }
 
@@ -1019,6 +1096,8 @@ class StoreService {
 
   // --- Orders ---
   public async placeOrder(orderData: {
+    id?: string;
+    orderId?: string;
     screen: string;
     row: string;
     col?: string | number;
@@ -1032,14 +1111,16 @@ class StoreService {
     paidAt?: number;
     round?: number;
     isDemo?: boolean;
+    isTest?: boolean;
+    userId?: string;
+    alreadySavedInFirestore?: boolean;
   }): Promise<Order> {
     const cleanRow = orderData.row.trim().toUpperCase();
     const cleanSeat = orderData.seat.trim();
-    const randomHex = Math.floor(1000 + Math.random() * 9000);
-    const orderId = `SS-${randomHex}`;
+    const orderId = orderData.orderId || `SS-${Math.floor(1000 + Math.random() * 9000)}`;
 
     const newOrder: Order = {
-      id: 'ord-' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
+      id: orderData.id || ('ord-' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6)),
       orderId,
       screen: String(orderData.screen),
       row: cleanRow,
@@ -1056,29 +1137,44 @@ class StoreService {
       round: orderData.round || 1,
       createdAt: Date.now(),
       isDemo: Boolean(orderData.isDemo),
+      isTest: Boolean(orderData.isTest),
+      userId: orderData.userId,
     };
 
     // Optimistically update local state for instant responsiveness
-    this.orders = [newOrder, ...this.orders];
+    const existingIdx = this.orders.findIndex(
+      (o) => (newOrder.id && o.id === newOrder.id) || (newOrder.orderId && o.orderId === newOrder.orderId)
+    );
+    if (existingIdx >= 0) {
+      this.orders[existingIdx] = newOrder;
+    } else {
+      this.orders = [newOrder, ...this.orders];
+    }
     localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify(this.orders));
     this.notifyOrderListeners();
     if (this.broadcastChannel) {
       this.broadcastChannel.postMessage({ type: 'ORDER_PLACED', payload: newOrder });
     }
 
-    // Persist to Google Cloud Firestore for real-time cross-phone syncing
-    if (this.db) {
+    // Persist to Google Cloud Firestore if not already saved by backend /api/create-order
+    if (this.db && !orderData.alreadySavedInFirestore) {
       try {
         const colRef = collection(this.db, 'orders');
-        const docRef = await addDoc(colRef, {
+        const docPayload: any = {
           orderId: newOrder.orderId,
           screen: newOrder.screen,
           row: newOrder.row,
           col: newOrder.col,
           seat: newOrder.seat,
-          items: newOrder.items,
+          items: newOrder.items.map((it) => ({
+            id: it.id,
+            name: it.name,
+            qty: it.qty,
+            price: it.price,
+            isVeg: it.isVeg !== undefined ? Boolean(it.isVeg) : true,
+          })),
           total: newOrder.total,
-          notes: newOrder.notes,
+          notes: newOrder.notes || '',
           status: newOrder.status,
           paymentMethod: newOrder.paymentMethod,
           paymentStatus: newOrder.paymentStatus,
@@ -1086,7 +1182,11 @@ class StoreService {
           round: newOrder.round || 1,
           createdAt: newOrder.createdAt,
           isDemo: Boolean(newOrder.isDemo),
-        });
+        };
+        if (newOrder.isTest) docPayload.isTest = true;
+        if (newOrder.userId) docPayload.userId = newOrder.userId;
+
+        const docRef = await addDoc(colRef, docPayload);
         const oldId = newOrder.id;
         newOrder.id = docRef.id;
         this.orders = this.orders.map((o) => (o.id === oldId ? newOrder : o));
@@ -1245,8 +1345,14 @@ class StoreService {
 
   public async saveScreenConfig(config: ScreenGridConfig): Promise<ScreenGridConfig> {
     const scr = String(config.screenNumber);
+    const existing = this.getScreenConfig(scr);
+    const seatMap = config.seatMap || existing?.seatMap || createDefaultSeatMap(scr);
+    const layout = config.layout || createSummaryLayout(seatMap);
+
     const updated: ScreenGridConfig = {
       ...config,
+      seatMap,
+      layout,
       updatedAt: Date.now(),
     };
 
@@ -1261,9 +1367,73 @@ class StoreService {
     if (!this.isDemo && this.db) {
       try {
         const docRef = doc(this.db, 'screens', `screen${scr}`);
-        await setDoc(docRef, updated);
+        await setDoc(docRef, updated, { merge: true });
       } catch (err) {
         console.error('Firestore saveScreenConfig failed:', err);
+      }
+    }
+
+    return updated;
+  }
+
+  public async saveSeatMap(
+    screenNumber: string,
+    seatMap: SeatMapConfig
+  ): Promise<ScreenGridConfig> {
+    const scr = String(screenNumber);
+    const existing = this.getScreenConfig(scr) || {
+      id: `screen-${scr}`,
+      name: `Screen ${scr}`,
+      screenNumber: scr,
+      rowsCount: seatMap.rows.length,
+      seatsPerRow: Math.max(1, ...seatMap.rows.map((r) => r.seats.length)),
+      rowOverrides: {},
+      aisleGaps: [],
+      disabledSeats: [],
+    };
+
+    const layout = createSummaryLayout(seatMap);
+
+    // Keep up to 5 historical versions for undo
+    const existingHistory = existing.seatMapHistory || [];
+    const newHistory = existing.seatMap
+      ? [existing.seatMap, ...existingHistory.filter((h) => h.updatedAt !== existing.seatMap?.updatedAt)].slice(0, 5)
+      : existingHistory;
+
+    const updated: ScreenGridConfig = {
+      ...existing,
+      rowsCount: seatMap.rows.length,
+      seatsPerRow: Math.max(existing.seatsPerRow, ...seatMap.rows.map((r) => r.seats.length)),
+      seatMap,
+      layout,
+      seatMapHistory: newHistory,
+      updatedAt: Date.now(),
+    };
+
+    this.screens[scr] = updated;
+    localStorage.setItem(STORAGE_KEY_SCREENS, JSON.stringify(this.screens));
+    this.notifyScreenListeners();
+
+    if (this.broadcastChannel) {
+      this.broadcastChannel.postMessage({ type: 'SCREEN_UPDATE', payload: updated });
+    }
+
+    if (!this.isDemo && this.db) {
+      try {
+        const docRef = doc(this.db, 'screens', `screen${scr}`);
+        await setDoc(
+          docRef,
+          {
+            ...updated,
+            seatMap,
+            layout,
+            seatMapHistory: newHistory,
+            updatedAt: Date.now(),
+          },
+          { merge: true }
+        );
+      } catch (err) {
+        console.error('Firestore saveSeatMap failed:', err);
       }
     }
 
@@ -1287,6 +1457,46 @@ class StoreService {
       return { valid: true };
     }
 
+    // 1. If screen has real seatMap, validate against seatMap
+    if (config.seatMap && Array.isArray(config.seatMap.rows) && config.seatMap.rows.length > 0) {
+      const targetRow = config.seatMap.rows.find((r) => r.row.toUpperCase() === cleanRow);
+      if (!targetRow) {
+        return {
+          valid: false,
+          reason: `Row ${cleanRow} does not exist in Screen ${screenNumber}.`,
+        };
+      }
+      const targetSeat = targetRow.seats.find(
+        (s) => s.col === cleanSeat || s.label === `${cleanRow}${cleanSeat}`
+      );
+      if (!targetSeat) {
+        return {
+          valid: false,
+          reason: `Seat ${cleanRow}${cleanSeat} does not exist in Screen ${screenNumber}'s seat plan.`,
+        };
+      }
+      return { valid: true };
+    }
+
+    // 2. Fallback to old layout check
+    if (config.layout && Array.isArray(config.layout) && config.layout.length > 0) {
+      const targetRow = config.layout.find((r) => r.row.toUpperCase() === cleanRow);
+      if (!targetRow) {
+        return {
+          valid: false,
+          reason: `Row ${cleanRow} does not exist in Screen ${screenNumber}.`,
+        };
+      }
+      if (cleanSeat > targetRow.seats) {
+        return {
+          valid: false,
+          reason: `Seat ${cleanSeat} exceeds maximum seats in Row ${cleanRow} (${targetRow.seats} seats).`,
+        };
+      }
+      return { valid: true };
+    }
+
+    // 3. Fallback to rowsCount & seatsPerRow check
     const rowIndex = getRowIndex(cleanRow);
     if (rowIndex < 0 || rowIndex >= config.rowsCount) {
       const maxRowLetter = getRowLetter(config.rowsCount - 1);

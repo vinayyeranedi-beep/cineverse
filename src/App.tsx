@@ -391,6 +391,16 @@ export default function App() {
               orders={orders}
               onOpenReportIssue={handleOpenReportIssue}
               onOpenQRTest={() => setIsQRTestModalOpen(true)}
+              onSelectSeat={(newSc, newRow, newSeat) => {
+                setScreen(newSc);
+                setRow(newRow);
+                setSeat(newSeat);
+                sessionStorage.setItem(
+                  SESSION_STORAGE_SEAT_KEY,
+                  JSON.stringify({ screen: newSc, row: newRow, seat: newSeat })
+                );
+                updateUrlParams(newSc, newRow, newSeat);
+              }}
             />
           )}
 

@@ -43,6 +43,7 @@ import {
   RefreshCw,
   Filter,
   ArrowUpRight,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   MenuItem,
@@ -56,6 +57,8 @@ import {
 import { storeService, getRowLetter } from '../services/store';
 import { CineverseLogo } from './CineverseLogo';
 import { TicketsManagementView } from './TicketsManagementView';
+import { SeatPlanBuilder } from './SeatPlanBuilder';
+import { SystemCheckView } from './SystemCheckView';
 import {
   startOfDay,
   endOfDay,
@@ -79,8 +82,11 @@ interface AdminPanelProps {
 interface SeatQRItem {
   screen: string;
   row: string;
+  col?: number;
   seat: number;
   seatLabel: string;
+  type?: string;
+  x?: number;
   url: string;
   dataUrl: string;
 }
@@ -92,7 +98,7 @@ interface RowQRGroup {
 
 const CATEGORIES: Category[] = ['Popcorn', 'Drinks', 'Snacks', 'Combos', 'Desserts'];
 
-type AdminTab = 'menu' | 'screens' | 'qr' | 'staff' | 'analytics' | 'tickets';
+type AdminTab = 'menu' | 'screens' | 'seatplan' | 'qr' | 'staff' | 'analytics' | 'tickets' | 'systemcheck';
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
   menuItems,
@@ -158,10 +164,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   });
   const [qrRowSearch, setQrRowSearch] = useState('');
   const [rowQRGroups, setRowQRGroups] = useState<RowQRGroup[]>([]);
+  const [qrViewMode, setQrViewMode] = useState<'seatmap' | 'grid'>('seatmap');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isZipping, setIsZipping] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [previewQRItem, setPreviewQRItem] = useState<SeatQRItem | null>(null);
+
+  // Max X coordinate for QR seat map arrangement preview
+  const qrMaxX = useMemo(() => {
+    const sc = screensMap[selectedScreenId];
+    if (!sc?.seatMap?.rows) return 22;
+    let max = 20;
+    sc.seatMap.rows.forEach((r) => {
+      r.seats.forEach((s) => {
+        if (s.x > max) max = s.x;
+      });
+    });
+    return max + 2;
+  }, [screensMap, selectedScreenId]);
 
   // Staff state
   const [staffList, setStaffList] = useState<StaffAccount[]>([]);
@@ -579,46 +599,85 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
-  // Generate QR codes for all valid seats of current screen
+  // Generate QR codes ONLY for seats that exist in the seat map, using the real labels
   const handleGenerateQRs = async () => {
     setIsGenerating(true);
     try {
       const cleanBase = websiteAddress.trim().replace(/\/$/, '');
       const groups: RowQRGroup[] = [];
+      const currentScreen = screensMap[selectedScreenId];
 
-      for (let r = 0; r < rowsCount; r++) {
-        const rowLetter = getRowLetter(r);
-        const rowSeatsCount = parsedRowOverrides[rowLetter] || seatsPerRow;
-        const rowSeats: SeatQRItem[] = [];
+      if (currentScreen?.seatMap && Array.isArray(currentScreen.seatMap.rows)) {
+        // Use real seat arrangement from seatMap
+        for (const rowItem of currentScreen.seatMap.rows) {
+          const rowSeats: SeatQRItem[] = [];
 
-        for (let s = 1; s <= rowSeatsCount; s++) {
-          const seatLabel = `${rowLetter}${s}`;
-          // Exclude disabled/non-existent seats
-          if (disabledSeats.includes(seatLabel)) continue;
+          for (const seatItem of rowItem.seats) {
+            // URL format specified: {baseUrl}/order?screen={N}&row={row}&col={col}
+            const url = `${cleanBase}/order?screen=${selectedScreenId}&row=${rowItem.row}&col=${seatItem.col}`;
+            const dataUrl = await QRCode.toDataURL(url, {
+              width: 220,
+              margin: 1,
+              color: { dark: '#000000', light: '#ffffff' },
+            });
 
-          // Format QR: ?screen=1&row=B&seat=7 (loads directly with no 404 redirect)
-          const url = `${cleanBase}/?screen=${selectedScreenId}&row=${rowLetter}&seat=${s}`;
-          const dataUrl = await QRCode.toDataURL(url, {
-            width: 220,
-            margin: 1,
-            color: { dark: '#000000', light: '#ffffff' },
-          });
+            rowSeats.push({
+              screen: selectedScreenId,
+              row: rowItem.row,
+              col: seatItem.col,
+              seat: seatItem.col,
+              seatLabel: seatItem.label,
+              type: seatItem.type,
+              x: seatItem.x,
+              url,
+              dataUrl,
+            });
+          }
 
-          rowSeats.push({
-            screen: selectedScreenId,
-            row: rowLetter,
-            seat: s,
-            seatLabel,
-            url,
-            dataUrl,
-          });
+          if (rowSeats.length > 0) {
+            groups.push({
+              row: rowItem.row,
+              seats: rowSeats,
+            });
+          }
         }
+      } else {
+        // Fallback to legacy grid if seatMap not loaded yet
+        for (let r = 0; r < rowsCount; r++) {
+          const rowLetter = getRowLetter(r);
+          const rowSeatsCount = parsedRowOverrides[rowLetter] || seatsPerRow;
+          const rowSeats: SeatQRItem[] = [];
 
-        if (rowSeats.length > 0) {
-          groups.push({
-            row: rowLetter,
-            seats: rowSeats,
-          });
+          for (let s = 1; s <= rowSeatsCount; s++) {
+            const seatLabel = `${rowLetter}${s}`;
+            if (disabledSeats.includes(seatLabel)) continue;
+
+            const url = `${cleanBase}/order?screen=${selectedScreenId}&row=${rowLetter}&col=${s}`;
+            const dataUrl = await QRCode.toDataURL(url, {
+              width: 220,
+              margin: 1,
+              color: { dark: '#000000', light: '#ffffff' },
+            });
+
+            rowSeats.push({
+              screen: selectedScreenId,
+              row: rowLetter,
+              col: s,
+              seat: s,
+              seatLabel,
+              type: 'standard',
+              x: s,
+              url,
+              dataUrl,
+            });
+          }
+
+          if (rowSeats.length > 0) {
+            groups.push({
+              row: rowLetter,
+              seats: rowSeats,
+            });
+          }
         }
       }
 
@@ -842,6 +901,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </button>
 
             <button
+              onClick={() => setActiveTab('seatplan')}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all min-h-[40px] ${
+                activeTab === 'seatplan'
+                  ? 'bg-[#E50914] text-white shadow-md shadow-[#E50914]/25'
+                  : 'text-[#A1A1AA] hover:text-white hover:bg-zinc-800'
+              }`}
+            >
+              <Layers className="w-4 h-4" />
+              <span>Seat Plan</span>
+            </button>
+
+            <button
               onClick={() => setActiveTab('qr')}
               className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all min-h-[40px] ${
                 activeTab === 'qr'
@@ -909,6 +980,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </span>
               )}
             </button>
+
+            {/* Admin-only System Check Tab (Only available when VITE_ENABLE_SYSTEM_CHECK is "true") */}
+            {import.meta.env.VITE_ENABLE_SYSTEM_CHECK === 'true' && (
+              <button
+                onClick={() => setActiveTab('systemcheck')}
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all min-h-[40px] ${
+                  activeTab === 'systemcheck'
+                    ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/25'
+                    : 'text-emerald-400/80 hover:text-emerald-300 hover:bg-emerald-950/30'
+                }`}
+              >
+                <ShieldCheck className="w-4 h-4" />
+                <span>System Check</span>
+                <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  TEST
+                </span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -1180,6 +1269,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         )}
 
         {/* ============================================================ */}
+        {/* TAB: SEAT PLAN BUILDER (ADMIN ONLY) */}
+        {/* ============================================================ */}
+        {activeTab === 'seatplan' && (
+          <SeatPlanBuilder screensMap={screensMap} />
+        )}
+
+        {/* ============================================================ */}
         {/* TAB 2: SEAT QR GENERATOR */}
         {/* ============================================================ */}
         {activeTab === 'qr' && (
@@ -1282,6 +1378,47 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   />
                 </div>
               </div>
+
+              {/* View Arrangement Toggle (Requirement 3a: Show QR codes in same arrangement as seat map preview) */}
+              {rowQRGroups.length > 0 && (
+                <div className="flex items-center justify-between pt-4 mt-4 border-t border-zinc-800">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-[#A1A1AA] uppercase tracking-wider">
+                      Layout Arrangement:
+                    </span>
+                    <div className="flex items-center gap-1 bg-[#0B0B0F] p-1 rounded-xl border border-zinc-800 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setQrViewMode('seatmap')}
+                        className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all flex items-center gap-1.5 ${
+                          qrViewMode === 'seatmap'
+                            ? 'bg-[#D4AF37] text-zinc-950 font-black shadow-sm'
+                            : 'text-zinc-400 hover:text-white'
+                        }`}
+                      >
+                        <Layers className="w-3.5 h-3.5" />
+                        <span>Seat Map Arrangement</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setQrViewMode('grid')}
+                        className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all flex items-center gap-1.5 ${
+                          qrViewMode === 'grid'
+                            ? 'bg-[#D4AF37] text-zinc-950 font-black shadow-sm'
+                            : 'text-zinc-400 hover:text-white'
+                        }`}
+                      >
+                        <Grid3X3 className="w-3.5 h-3.5" />
+                        <span>Compact Grid</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <span className="text-xs text-zinc-400 font-mono">
+                    Showing {filteredQRGroups.reduce((sum, g) => sum + g.seats.length, 0)} QR Stickers
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* QR Codes Grid by Row */}
@@ -1294,7 +1431,92 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     Click "Generate Screen {selectedScreenId} QRs" above to create printable QR stickers for all {screenStats.validSeatsCount} valid seats.
                   </p>
                 </div>
+              ) : qrViewMode === 'seatmap' ? (
+                /* CINEMA SEAT MAP ARRANGEMENT VIEW */
+                <div className="bg-[#15151C] border border-zinc-800 rounded-3xl p-6 shadow-xl space-y-6">
+                  {/* Screen indicator */}
+                  <div className="max-w-md mx-auto text-center space-y-1 pt-1 pb-3">
+                    <div className="h-1.5 w-full bg-gradient-to-r from-transparent via-[#D4AF37] to-transparent rounded-full shadow-[0_0_12px_rgba(212,175,55,0.6)]" />
+                    <span className="text-[10px] font-display font-black tracking-[0.25em] text-[#D4AF37] uppercase">
+                      SCREEN THIS WAY
+                    </span>
+                  </div>
+
+                  <div className="space-y-4">
+                    {filteredQRGroups.map((group) => (
+                      <div key={group.row} className="bg-[#0B0B0F] border border-zinc-800/80 rounded-2xl p-3.5">
+                        <div className="flex items-center justify-between pb-2.5 border-b border-zinc-800/60 mb-3 text-xs">
+                          <span className="font-bold text-[#D4AF37] flex items-center gap-2">
+                            <span className="w-6 h-6 rounded bg-[#D4AF37]/20 text-[#D4AF37] flex items-center justify-center font-mono font-black text-xs">
+                              {group.row}
+                            </span>
+                            <span>Row {group.row} ({group.seats.length} QR Stickers)</span>
+                          </span>
+                          <span className="text-zinc-500 font-mono text-[11px]">
+                            Physical Arrangement Preview
+                          </span>
+                        </div>
+
+                        {/* Row with physical aisles and x positioning */}
+                        <div className="overflow-x-auto pb-2">
+                          <div className="min-w-[850px] relative h-[180px] bg-zinc-950/60 rounded-xl px-2 border border-zinc-900/80">
+                            {group.seats.map((item) => (
+                              <div
+                                key={item.seatLabel}
+                                style={{
+                                  position: 'absolute',
+                                  left: `${((item.x ?? item.seat) / (qrMaxX || 22)) * 100}%`,
+                                  width: '85px',
+                                }}
+                                className="print-card top-2 bottom-2 bg-[#15151C] border border-zinc-800 hover:border-[#D4AF37] p-1.5 rounded-xl flex flex-col items-center justify-between transition-all hover:scale-105 group shadow-md"
+                              >
+                                <div
+                                  onClick={() => setPreviewQRItem(item)}
+                                  className="w-full aspect-square bg-white p-1 rounded-lg flex items-center justify-center cursor-pointer shadow-sm relative"
+                                >
+                                  <img
+                                    src={item.dataUrl}
+                                    alt={item.seatLabel}
+                                    className="w-full h-full object-contain"
+                                  />
+                                </div>
+
+                                <div className="text-center w-full my-0.5">
+                                  <span className="font-display font-black text-[11px] text-white group-hover:text-[#D4AF37] block">
+                                    {item.seatLabel}
+                                  </span>
+                                  <span className="text-[8px] uppercase tracking-wider text-zinc-400 block truncate">
+                                    {item.type}
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center gap-1 w-full pt-1 border-t border-zinc-800/60">
+                                  <button
+                                    onClick={() => onSelectCustomerSeat(String(item.screen), item.row, String(item.seat))}
+                                    title="Test Scan"
+                                    className="flex-1 py-0.5 rounded bg-zinc-800 hover:bg-[#D4AF37] hover:text-black text-[9px] font-bold text-zinc-300 flex items-center justify-center"
+                                  >
+                                    <Smartphone className="w-2.5 h-2.5 mr-0.5" />
+                                    <span>Test</span>
+                                  </button>
+                                  <button
+                                    onClick={() => handleDownloadSingleQR(item)}
+                                    title="Download"
+                                    className="p-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white"
+                                  >
+                                    <Download className="w-2.5 h-2.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               ) : (
+                /* COMPACT CARD GRID VIEW */
                 filteredQRGroups.map((group) => (
                   <div key={group.row} className="bg-[#15151C] border border-zinc-800 rounded-3xl p-5 shadow-xl">
                     <div className="flex items-center justify-between pb-3 border-b border-zinc-800 mb-4">
@@ -2304,6 +2526,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               onSelectCustomerSeat(screen, row, seat);
             }}
           />
+        )}
+
+        {/* ============================================================ */}
+        {/* TAB 7: SYSTEM INTEGRITY & DIAGNOSTIC CHECKS (TEST DEPLOYMENT ONLY) */}
+        {/* ============================================================ */}
+        {activeTab === 'systemcheck' && import.meta.env.VITE_ENABLE_SYSTEM_CHECK === 'true' && (
+          <SystemCheckView />
         )}
 
 

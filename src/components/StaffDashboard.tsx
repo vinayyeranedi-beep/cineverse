@@ -151,6 +151,22 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
     return () => unsub();
   }, [selectedDate]);
 
+  // Sync incoming orders from App-level initialOrders subscription immediately
+  useEffect(() => {
+    if (!isToday(selectedDate)) return;
+    const todayStart = startOfDay(selectedDate);
+    const todayEnd = endOfDay(selectedDate);
+    const matchingInitial = initialOrders.filter((o) => o.createdAt >= todayStart && o.createdAt <= todayEnd);
+    if (matchingInitial.length > 0) {
+      setDayOrders((prev) => {
+        const map = new Map<string, Order>();
+        prev.forEach((o) => map.set(o.id || o.orderId || String(o.createdAt), o));
+        matchingInitial.forEach((o) => map.set(o.id || o.orderId || String(o.createdAt), o));
+        return Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
+      });
+    }
+  }, [initialOrders, selectedDate]);
+
   // Track new incoming orders on "Today" to trigger audio chime and visual highlight
   const prevTodayOrderIdsRef = useRef<Set<string>>(new Set());
 
@@ -274,10 +290,26 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
       if (ord.status !== 'delivered' && ord.status !== 'cancelled') {
         const key = `${ord.screen}-${ord.row.toUpperCase()}${ord.seat}`;
         map[key] = ord;
+        if (ord.col !== undefined) {
+          map[`${ord.screen}-${ord.row.toUpperCase()}${ord.col}`] = ord;
+        }
       }
     }
     return map;
   }, [validDayOrders]);
+
+  // Compute max horizontal position for the live auditorium seat map
+  const mapMaxX = useMemo(() => {
+    const config = screensMap[mapScreenId];
+    if (!config?.seatMap?.rows) return 22;
+    let max = 20;
+    config.seatMap.rows.forEach((r) => {
+      r.seats.forEach((s) => {
+        if (s.x > max) max = s.x;
+      });
+    });
+    return max + 2;
+  }, [screensMap, mapScreenId]);
 
   // CSV Export for the Selected Day
   const handleDownloadDayCSV = () => {
@@ -1153,7 +1185,7 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
                 <div className="flex flex-wrap items-center gap-3 text-[10px] pb-1">
                   <div className="flex items-center gap-1">
                     <span className="w-2.5 h-2.5 rounded-full bg-[#E50914] animate-pulse" />
-                    <span className="text-white">New</span>
+                    <span className="text-white">New Order</span>
                   </div>
                   <div className="flex items-center gap-1">
                     <span className="w-2.5 h-2.5 rounded-full bg-[#2563EB]" />
@@ -1162,6 +1194,10 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
                   <div className="flex items-center gap-1">
                     <span className="w-2.5 h-2.5 rounded-full bg-[#D4AF37]" />
                     <span className="text-white">Out for Delivery</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                    <span className="text-white">Delivered</span>
                   </div>
                   <div className="flex items-center gap-1">
                     <span className="w-2.5 h-2.5 rounded bg-zinc-800 border border-zinc-700" />
@@ -1181,96 +1217,188 @@ export const StaffDashboard: React.FC<StaffDashboardProps> = ({
                   </span>
                 </div>
 
-                {/* Grid Visualizer */}
+                {/* Real Seat Map Visualizer or Fallback Grid */}
                 <div className="overflow-x-auto pb-2 max-h-[500px]">
-                  <div className="min-w-max flex flex-col items-center gap-1">
-                    {Array.from({ length: currentMapConfig.rowsCount }).map((_, rIdx) => {
-                      const rowLetter = getRowLetter(rIdx);
-                      const rowSeatsCount =
-                        currentMapConfig.rowOverrides?.[rowLetter] || currentMapConfig.seatsPerRow;
-
-                      return (
-                        <div key={rowLetter} className="flex items-center gap-1.5">
-                          <span className="w-5 text-center font-mono font-bold text-[10px] text-[#D4AF37]">
-                            {rowLetter}
+                  {currentMapConfig.seatMap?.rows && currentMapConfig.seatMap.rows.length > 0 ? (
+                    <div className="min-w-[620px] flex flex-col gap-1.5 p-1">
+                      {currentMapConfig.seatMap.rows.map((rowItem) => (
+                        <div key={rowItem.row} className="flex items-center gap-2">
+                          <span className="w-5 text-center font-mono font-bold text-[10px] text-[#D4AF37] shrink-0">
+                            {rowItem.row}
                           </span>
 
-                          <div className="flex items-center gap-1">
-                            {Array.from({ length: rowSeatsCount }).map((_, sIdx) => {
-                              const seatNum = sIdx + 1;
-                              const seatCode = `${rowLetter}${seatNum}`;
-                              const isDisabled = currentMapConfig.disabledSeats?.includes(seatCode);
-                              const hasAisleGap = currentMapConfig.aisleGaps?.includes(seatNum);
-
-                              // Check if seat has active order
+                          <div className="flex-1 relative h-7 flex items-center bg-zinc-950/50 rounded-xl px-1 border border-zinc-900">
+                            {rowItem.seats.map((seatItem) => {
+                              const seatCode = seatItem.label || `${rowItem.row}${seatItem.col}`;
                               const activeOrderKey = `${mapScreenId}-${seatCode}`;
-                              const seatOrder = seatOrdersMap[activeOrderKey];
+                              const seatOrder =
+                                seatOrdersMap[activeOrderKey] ||
+                                Object.values(seatOrdersMap).find(
+                                  (o) =>
+                                    String(o.screen) === String(mapScreenId) &&
+                                    o.row.toUpperCase() === rowItem.row.toUpperCase() &&
+                                    (String(o.seat) === String(seatItem.col) || o.seat === seatCode)
+                                );
 
-                              // Check if seat has open ticket
                               const seatTickets = tickets.filter(
                                 (t) =>
-                                  t.screen === mapScreenId &&
-                                  t.row.toUpperCase() === rowLetter &&
-                                  (t.seat === String(seatNum) || t.seat === seatCode)
+                                  String(t.screen) === String(mapScreenId) &&
+                                  t.row.toUpperCase() === rowItem.row.toUpperCase() &&
+                                  (String(t.seat) === String(seatItem.col) || t.seat === seatCode)
                               );
                               const hasOpenTicket = seatTickets.some((t) => t.status === 'open');
 
                               let seatStyle = 'bg-zinc-800 border-zinc-700 text-zinc-400';
-                              if (isDisabled) {
-                                seatStyle = 'bg-zinc-950 border-zinc-900 text-zinc-700 opacity-40';
-                              } else if (seatOrder) {
+                              if (seatItem.type === 'premium') seatStyle = 'bg-amber-950/40 border-[#D4AF37]/60 text-[#D4AF37]';
+                              else if (seatItem.type === 'recliner') seatStyle = 'bg-purple-950/40 border-purple-500/60 text-purple-300';
+                              else if (seatItem.type === 'wheelchair') seatStyle = 'bg-blue-950/40 border-blue-400/60 text-blue-300';
+                              else if (seatItem.type === 'couple') seatStyle = 'bg-rose-950/40 border-rose-400/60 text-rose-300';
+
+                              if (seatOrder) {
                                 if (seatOrder.status === 'received') {
                                   seatStyle =
-                                    'bg-[#E50914] text-white border-[#E50914] font-black shadow-md shadow-[#E50914]/50 animate-pulse';
+                                    'bg-[#E50914] text-white border-[#E50914] font-black shadow-md shadow-[#E50914]/50 animate-pulse z-10';
                                 } else if (seatOrder.status === 'preparing') {
                                   seatStyle =
-                                    'bg-[#2563EB] text-white border-[#2563EB] font-black shadow-md shadow-[#2563EB]/40';
-                                } else if (seatOrder.status === 'on_the_way') {
+                                    'bg-[#2563EB] text-white border-[#2563EB] font-black shadow-md shadow-[#2563EB]/40 z-10';
+                                } else if (seatOrder.status === 'ready' || seatOrder.status === 'on_the_way') {
                                   seatStyle =
-                                    'bg-[#D4AF37] text-zinc-950 border-[#D4AF37] font-black shadow-md shadow-[#D4AF37]/40';
+                                    'bg-[#D4AF37] text-zinc-950 border-[#D4AF37] font-black shadow-md shadow-[#D4AF37]/40 z-10';
+                                } else if (seatOrder.status === 'delivered') {
+                                  seatStyle = 'bg-emerald-600 text-white border-emerald-500 font-bold z-10';
                                 }
                               }
 
                               return (
-                                <React.Fragment key={seatNum}>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      if (!isDisabled) {
-                                        setSelectedSeatForDetails({
-                                          screen: mapScreenId,
-                                          row: rowLetter,
-                                          seat: String(seatNum),
-                                          order: seatOrder,
-                                        });
-                                      }
-                                    }}
-                                    title={`${seatCode}${hasOpenTicket ? ' - [OPEN TICKET]' : ''}${seatOrder ? ` - Order #${seatOrder.orderId} (${seatOrder.status})` : ''}`}
-                                    className={`w-6 h-6 rounded text-[9px] font-mono transition-all flex items-center justify-center border relative ${seatStyle}`}
-                                  >
-                                    {hasOpenTicket && (
-                                      <span
-                                        className="absolute -top-1.5 -right-1.5 z-20 w-3 h-3 rounded-full bg-amber-400 text-black flex items-center justify-center shadow-md animate-bounce"
-                                        title="Open Issue Ticket"
-                                      >
-                                        <AlertTriangle className="w-2 h-2 stroke-[3]" />
-                                      </span>
-                                    )}
-                                    {isDisabled ? '·' : seatNum}
-                                  </button>
-                                  {hasAisleGap && <div className="w-3" />}
-                                </React.Fragment>
+                                <button
+                                  key={seatCode}
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedSeatForDetails({
+                                      screen: mapScreenId,
+                                      row: rowItem.row,
+                                      seat: String(seatItem.col),
+                                      order: seatOrder,
+                                    });
+                                  }}
+                                  style={{
+                                    position: 'absolute',
+                                    left: `${(seatItem.x / (mapMaxX || 22)) * 100}%`,
+                                    width: seatItem.type === 'couple' ? '38px' : '24px',
+                                  }}
+                                  title={`Seat ${seatCode} (${seatItem.type})${hasOpenTicket ? ' - [OPEN TICKET]' : ''}${seatOrder ? ` - Order #${seatOrder.orderId} (${seatOrder.status})` : ''}`}
+                                  className={`h-6 rounded text-[9px] font-mono transition-all flex items-center justify-center border relative ${seatStyle}`}
+                                >
+                                  {hasOpenTicket && (
+                                    <span
+                                      className="absolute -top-1.5 -right-1.5 z-20 w-3 h-3 rounded-full bg-amber-400 text-black flex items-center justify-center shadow-md animate-bounce"
+                                      title="Open Issue Ticket"
+                                    >
+                                      <AlertTriangle className="w-2 h-2 stroke-[3]" />
+                                    </span>
+                                  )}
+                                  {seatItem.col}
+                                </button>
                               );
                             })}
                           </div>
 
-                          <span className="w-5 text-center font-mono font-bold text-[10px] text-[#D4AF37]">
-                            {rowLetter}
+                          <span className="w-5 text-center font-mono font-bold text-[10px] text-[#D4AF37] shrink-0">
+                            {rowItem.row}
                           </span>
                         </div>
-                      );
-                    })}
-                  </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="min-w-max flex flex-col items-center gap-1">
+                      {Array.from({ length: currentMapConfig.rowsCount }).map((_, rIdx) => {
+                        const rowLetter = getRowLetter(rIdx);
+                        const rowSeatsCount =
+                          currentMapConfig.rowOverrides?.[rowLetter] || currentMapConfig.seatsPerRow;
+
+                        return (
+                          <div key={rowLetter} className="flex items-center gap-1.5">
+                            <span className="w-5 text-center font-mono font-bold text-[10px] text-[#D4AF37]">
+                              {rowLetter}
+                            </span>
+
+                            <div className="flex items-center gap-1">
+                              {Array.from({ length: rowSeatsCount }).map((_, sIdx) => {
+                                const seatNum = sIdx + 1;
+                                const seatCode = `${rowLetter}${seatNum}`;
+                                const isDisabled = currentMapConfig.disabledSeats?.includes(seatCode);
+                                const hasAisleGap = currentMapConfig.aisleGaps?.includes(seatNum);
+
+                                // Check if seat has active order
+                                const activeOrderKey = `${mapScreenId}-${seatCode}`;
+                                const seatOrder = seatOrdersMap[activeOrderKey];
+
+                                // Check if seat has open ticket
+                                const seatTickets = tickets.filter(
+                                  (t) =>
+                                    t.screen === mapScreenId &&
+                                    t.row.toUpperCase() === rowLetter &&
+                                    (t.seat === String(seatNum) || t.seat === seatCode)
+                                );
+                                const hasOpenTicket = seatTickets.some((t) => t.status === 'open');
+
+                                let seatStyle = 'bg-zinc-800 border-zinc-700 text-zinc-400';
+                                if (isDisabled) {
+                                  seatStyle = 'bg-zinc-950 border-zinc-900 text-zinc-700 opacity-40';
+                                } else if (seatOrder) {
+                                  if (seatOrder.status === 'received') {
+                                    seatStyle =
+                                      'bg-[#E50914] text-white border-[#E50914] font-black shadow-md shadow-[#E50914]/50 animate-pulse';
+                                  } else if (seatOrder.status === 'preparing') {
+                                    seatStyle =
+                                      'bg-[#2563EB] text-white border-[#2563EB] font-black shadow-md shadow-[#2563EB]/40';
+                                  } else if (seatOrder.status === 'on_the_way') {
+                                    seatStyle =
+                                      'bg-[#D4AF37] text-zinc-950 border-[#D4AF37] font-black shadow-md shadow-[#D4AF37]/40';
+                                  }
+                                }
+
+                                return (
+                                  <React.Fragment key={seatNum}>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (!isDisabled) {
+                                          setSelectedSeatForDetails({
+                                            screen: mapScreenId,
+                                            row: rowLetter,
+                                            seat: String(seatNum),
+                                            order: seatOrder,
+                                          });
+                                        }
+                                      }}
+                                      title={`${seatCode}${hasOpenTicket ? ' - [OPEN TICKET]' : ''}${seatOrder ? ` - Order #${seatOrder.orderId} (${seatOrder.status})` : ''}`}
+                                      className={`w-6 h-6 rounded text-[9px] font-mono transition-all flex items-center justify-center border relative ${seatStyle}`}
+                                    >
+                                      {hasOpenTicket && (
+                                        <span
+                                          className="absolute -top-1.5 -right-1.5 z-20 w-3 h-3 rounded-full bg-amber-400 text-black flex items-center justify-center shadow-md animate-bounce"
+                                          title="Open Issue Ticket"
+                                        >
+                                          <AlertTriangle className="w-2 h-2 stroke-[3]" />
+                                        </span>
+                                      )}
+                                      {isDisabled ? '·' : seatNum}
+                                    </button>
+                                    {hasAisleGap && <div className="w-3" />}
+                                  </React.Fragment>
+                                );
+                              })}
+                            </div>
+
+                            <span className="w-5 text-center font-mono font-bold text-[10px] text-[#D4AF37]">
+                              {rowLetter}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 {/* Seat Detail Popover Card if selected */}

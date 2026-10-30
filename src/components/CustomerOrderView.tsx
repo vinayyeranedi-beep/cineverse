@@ -19,6 +19,7 @@ import {
   Loader2,
   AlertTriangle,
   QrCode,
+  Layers,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { MenuItem, Order, OrderItem, Category, IssueType } from '../types';
@@ -26,6 +27,7 @@ import { storeService } from '../services/store';
 import { soundService } from '../services/sound';
 import { useCart } from '../context/CartContext';
 import { CineverseLogo } from './CineverseLogo';
+import { SeatSelectorModal } from './SeatSelectorModal';
 
 interface CustomerOrderViewProps {
   screen: string;
@@ -35,6 +37,7 @@ interface CustomerOrderViewProps {
   orders: Order[];
   onOpenReportIssue?: (orderId?: string, initialIssue?: IssueType) => void;
   onOpenQRTest?: () => void;
+  onSelectSeat?: (screen: string, row: string, seat: string) => void;
 }
 
 const CATEGORIES: { label: string; value: Category | 'All' }[] = [
@@ -51,9 +54,9 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
   row,
   seat,
   menuItems,
-  orders,
   onOpenReportIssue,
   onOpenQRTest,
+  onSelectSeat,
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<Category | 'All'>('All');
   const [searchQuery, setSearchQuery] = useState('');
@@ -62,6 +65,13 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
   const [lastDeliveredOrderId, setLastDeliveredOrderId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isMyOrdersOpen, setIsMyOrdersOpen] = useState(false);
+  const [isSeatSelectorOpen, setIsSeatSelectorOpen] = useState(false);
+  const [orders, setOrders] = useState<Order[]>(() => storeService.getOrders());
+
+  useEffect(() => {
+    const unsub = storeService.subscribeOrders((ords) => setOrders(ords));
+    return () => unsub();
+  }, []);
 
   // Global Cart from Context (persisted in localStorage)
   const {
@@ -135,7 +145,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
 
   // Currently displayed active order in live tracker
   const currentTrackedOrder =
-    (selectedActiveOrderId ? activeSeatOrders.find((o) => o.id === selectedActiveOrderId) : null) ||
+    (selectedActiveOrderId ? activeSeatOrders.find((o: Order) => o.id === selectedActiveOrderId) : null) ||
     activeSeatOrders[0] ||
     storeActiveOrder;
 
@@ -215,13 +225,60 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
           };
         });
 
+      // 1. Validate seat against screens/screen{N}.seatMap via /api/create-order
+      let backendOrderId: string | undefined;
+      let backendDocId: string | undefined;
+
+      try {
+        const resp = await fetch('/api/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            screen,
+            row: row.toUpperCase(),
+            col: cleanSeatNum,
+            seat: cleanSeatNum,
+            items: orderItems,
+            total: cartTotal,
+            notes: customerNotes.trim(),
+            paymentMethod: 'pay_at_seat',
+            paymentStatus: 'paid',
+          }),
+        });
+        if (!resp.ok) {
+          const resData = await resp.json().catch(() => null);
+          if (resData && resData.error) {
+            setOrderError(resData.error);
+            setIsSubmitting(false);
+            return;
+          }
+        } else {
+          const resData = await resp.json().catch(() => null);
+          if (resData?.success) {
+            backendOrderId = resData.orderId;
+            backendDocId = resData.docId;
+          }
+        }
+      } catch (apiErr: any) {
+        // If network error occurred, fallback gracefully to client store
+        if (apiErr?.message && !apiErr.message.includes('fetch') && !apiErr.message.includes('Failed to fetch')) {
+          setOrderError(apiErr.message);
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
       const placed = await storeService.placeOrder({
+        id: backendDocId,
+        orderId: backendOrderId,
         screen,
         row: row.toUpperCase(),
+        col: cleanSeatNum,
         seat: cleanSeatNum,
         items: orderItems,
         total: cartTotal,
         notes: customerNotes.trim(),
+        alreadySavedInFirestore: Boolean(backendDocId),
       });
 
       // Remember order in session storage
@@ -259,33 +316,52 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
   if (!seatValidation.valid) {
     return (
       <div className="min-h-[85vh] bg-[#0B0B0F] flex items-center justify-center p-4 text-white">
-        <div className="max-w-md w-full p-6 sm:p-8 rounded-3xl bg-[#15151C] border border-[#E50914]/50 shadow-[0_0_50px_rgba(229,9,20,0.15)] text-center space-y-5 animate-fade-in">
-          <div className="w-16 h-16 rounded-2xl bg-[#E50914]/15 border border-[#E50914]/40 text-[#E50914] flex items-center justify-center mx-auto shadow-lg shadow-[#E50914]/20">
-            <AlertTriangle className="w-8 h-8 stroke-[2.2]" />
+        {/* Real Seat Map interactive picker modal (always open when QR invalid) */}
+        <SeatSelectorModal
+          isOpen={true}
+          canClose={false}
+          currentScreen={screen}
+          currentRow={row}
+          currentSeat={cleanSeatNum}
+          errorMessage={
+            seatValidation.reason ||
+            'Seat code is missing or not found on this screen. Tap your seat on the cinema hall plan below:'
+          }
+          onSelectSeat={(newSc, newRow, newSeat) => {
+            if (onSelectSeat) {
+              onSelectSeat(newSc, newRow, newSeat);
+            }
+          }}
+        />
+
+        <div className="max-w-md w-full p-6 sm:p-8 rounded-3xl bg-[#15151C] border border-[#D4AF37]/50 shadow-[0_0_50px_rgba(212,175,55,0.15)] text-center space-y-5 animate-fade-in">
+          <div className="w-16 h-16 rounded-2xl bg-[#D4AF37]/15 border border-[#D4AF37]/40 text-[#D4AF37] flex items-center justify-center mx-auto shadow-lg shadow-[#D4AF37]/20">
+            <Film className="w-8 h-8 stroke-[2.2]" />
           </div>
 
           <div className="space-y-2">
             <h2 className="text-xl sm:text-2xl font-display font-black text-white">
-              This QR code is not valid.
+              Select Your Cinema Seat
             </h2>
             <p className="text-sm text-zinc-400 leading-relaxed">
-              Please report the issue so our cinema team can assist you at your seat.
+              {seatValidation.reason || 'This QR is not attached to a valid seat. Tap below to choose your seat on the interactive hall plan.'}
             </p>
-            {seatValidation.reason && (
-              <p className="text-xs text-[#E50914] font-medium bg-[#E50914]/10 p-2.5 rounded-xl border border-[#E50914]/20">
-                {seatValidation.reason}
-              </p>
-            )}
           </div>
 
-          <div className="pt-2">
+          <div className="pt-2 space-y-2">
+            <button
+              onClick={() => setIsSeatSelectorOpen(true)}
+              className="w-full py-3.5 px-6 rounded-xl bg-[#E50914] hover:bg-[#c80812] text-white font-display font-black text-sm tracking-wide shadow-lg shadow-[#E50914]/30 flex items-center justify-center gap-2 transition-all active:scale-[0.98] min-h-[48px]"
+            >
+              <Layers className="w-4 h-4" />
+              <span>Tap to Choose Seat on Plan</span>
+            </button>
             {onOpenReportIssue && (
               <button
                 onClick={() => onOpenReportIssue(undefined, 'QR not working')}
-                className="w-full py-3.5 px-6 rounded-xl bg-[#E50914] hover:bg-[#c80812] text-white font-display font-black text-sm tracking-wide shadow-lg shadow-[#E50914]/30 flex items-center justify-center gap-2 transition-all active:scale-[0.98] min-h-[48px]"
+                className="text-xs text-zinc-400 hover:text-[#D4AF37] transition-colors py-1.5"
               >
-                <AlertTriangle className="w-4 h-4" />
-                <span>Report Issue</span>
+                Need assistance? Report an issue
               </button>
             )}
           </div>
@@ -306,11 +382,22 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
             <span className="text-xs sm:text-sm font-display font-bold tracking-wide">
               Screen {screen} - Seat {cleanSeatLabel}
             </span>
+
+            {/* Change Seat button to open tappable seat map */}
+            <button
+              onClick={() => setIsSeatSelectorOpen(true)}
+              title="Change seat on cinema seating plan"
+              className="ml-1 sm:ml-2 px-2.5 py-1 rounded-lg bg-zinc-800/90 hover:bg-zinc-700 text-[#D4AF37] hover:text-white border border-[#D4AF37]/30 text-[10px] font-bold flex items-center gap-1.5 transition-all active:scale-95"
+            >
+              <Layers className="w-3 h-3" />
+              <span>Change Seat</span>
+            </button>
+
             {onOpenQRTest && (
               <button
                 onClick={onOpenQRTest}
                 title="Test Armrest QR Scanner & Seat Simulator"
-                className="ml-1 sm:ml-2 px-2 py-0.5 rounded-lg bg-zinc-800/90 hover:bg-zinc-700 text-[#D4AF37] hover:text-white border border-[#D4AF37]/30 text-[10px] font-bold flex items-center gap-1 transition-all active:scale-95"
+                className="ml-1 px-2 py-0.5 rounded-lg bg-zinc-800/90 hover:bg-zinc-700 text-[#D4AF37] hover:text-white border border-[#D4AF37]/30 text-[10px] font-bold flex items-center gap-1 transition-all active:scale-95"
               >
                 <QrCode className="w-3 h-3" />
                 <span>Test QR</span>
@@ -380,7 +467,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
                 <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider shrink-0">
                   Active Orders:
                 </span>
-                {activeSeatOrders.map((ord) => {
+                {activeSeatOrders.map((ord: Order) => {
                   const isSelected = ord.id === currentTrackedOrder.id;
                   return (
                     <button
@@ -526,7 +613,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
             <div className="bg-[#0B0B0F] rounded-xl p-3.5 text-xs border border-zinc-800">
               <div className="text-[#A1A1AA] font-semibold mb-1.5">Items in preparation:</div>
               <div className="flex flex-wrap gap-2">
-                {currentTrackedOrder.items.map((it, idx) => (
+                {currentTrackedOrder.items.map((it: OrderItem, idx: number) => (
                   <span
                     key={idx}
                     className="bg-[#15151C] text-white px-2.5 py-1 rounded-lg font-mono text-[11px] border border-zinc-800"
@@ -999,6 +1086,22 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Interactive Cinema Hall Seat Selector Modal */}
+      <SeatSelectorModal
+        isOpen={isSeatSelectorOpen}
+        canClose={true}
+        currentScreen={screen}
+        currentRow={row}
+        currentSeat={cleanSeatNum}
+        onClose={() => setIsSeatSelectorOpen(false)}
+        onSelectSeat={(newSc, newRow, newSeat) => {
+          if (onSelectSeat) {
+            onSelectSeat(newSc, newRow, newSeat);
+          }
+          setIsSeatSelectorOpen(false);
+        }}
+      />
     </div>
   );
 };

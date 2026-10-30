@@ -116,6 +116,10 @@
           "type": "array",
           "description": "Array of row configurations with row label and seat count"
         },
+        "seatMap": {
+          "type": "object",
+          "description": "Detailed cinema hall seat map with physical row arrangements, aisle offsets, and seat types"
+        },
         "updatedAt": {
           "type": "number",
           "description": "Timestamp when screen layout was saved"

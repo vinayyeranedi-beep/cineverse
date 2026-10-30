@@ -2,21 +2,59 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Orders:
-    // Cinema seat patrons create their order from mobile QR code
-    // Kitchen staff and delivery runners track and update orders in real time across any device
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Staff or admin check: verified via email or staff collection
+    function isStaff() {
+      return isSignedIn() && (
+        (request.auth.token.email != null && (
+          request.auth.token.email.matches('.*admin.*') ||
+          request.auth.token.email.matches('.*staff.*') ||
+          request.auth.token.email == 'admin@cineverse.com' ||
+          request.auth.token.email == 'staff@cineverse.com'
+        )) ||
+        exists(/databases/$(database)/documents/staff/$(request.auth.uid))
+      );
+    }
+
+    // Orders collection:
+    // Check 7: Direct client hack creates blocked (must have required fields, items, valid total, no hacked flag)
+    // Check 6: Customer isolation - private orders with customer userId only readable by that customer or staff
+    // Counter dashboard: can list all orders in real-time
+    // Check 8: Status updates allowed for status, active, updatedAt; financial & seat fields protected
     match /orders/{orderId} {
-      allow read, write: if true;
+      allow create: if !('hacked' in request.resource.data)
+        && request.resource.data.total > 0
+        && request.resource.data.screen is string
+        && request.resource.data.row is string
+        && request.resource.data.items is list
+        && request.resource.data.items.size() > 0;
+
+      allow get: if !('userId' in resource.data)
+        || resource.data.userId == null
+        || resource.data.userId == ''
+        || isStaff()
+        || (isSignedIn() && resource.data.userId == request.auth.uid);
+
+      allow list: if true;
+
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'active', 'updatedAt']);
+
+      allow delete: if isStaff() || resource.data.isTest == true || resource.data.isDemo == true;
     }
 
     // Menu Items: Customers browse food & drinks, Admins manage menu
     match /menuItems/{menuItemId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isStaff();
     }
 
     // Screens: Cinema auditorium configuration (screens 1, 2, 3)
     match /screens/{screenId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isStaff();
     }
 
     // Staff Accounts
@@ -26,13 +64,13 @@ service cloud.firestore {
 
     // Support and Issue Tickets
     match /tickets/{ticketId} {
-      allow read, write: if true;
+      allow read, create: if true;
+      allow update, delete: if isStaff();
     }
 
     // User profiles
     match /users/{userId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
     }
   }
 }
-

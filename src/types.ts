@@ -52,6 +52,34 @@ export interface Order {
   updatedAt?: number;
   round?: number;
   isDemo?: boolean;
+  isTest?: boolean;
+  userId?: string;
+}
+
+export type SeatType = 'standard' | 'premium' | 'recliner' | 'wheelchair' | 'couple';
+
+export interface SeatMapSeat {
+  col: number;
+  label: string;
+  type: SeatType;
+  x: number;
+}
+
+export interface SeatMapRow {
+  row: string;
+  seats: SeatMapSeat[];
+  offset?: number;
+}
+
+export interface SeatMapConfig {
+  rows: SeatMapRow[];
+  version: number;
+  updatedAt: number;
+}
+
+export interface LayoutSummaryItem {
+  row: string;
+  seats: number;
 }
 
 export interface ScreenGridConfig {
@@ -63,6 +91,9 @@ export interface ScreenGridConfig {
   rowOverrides: Record<string, number>; // row letter -> seats count
   aisleGaps: number[]; // column indices after which an aisle gap exists (e.g. [7, 14])
   disabledSeats: string[]; // non-existent seats e.g. ["A1", "N21"]
+  seatMap?: SeatMapConfig;
+  layout?: LayoutSummaryItem[];
+  seatMapHistory?: SeatMapConfig[];
   updatedAt?: number;
 }
 
